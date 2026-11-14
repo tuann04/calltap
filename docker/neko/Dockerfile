@@ -2,7 +2,8 @@ FROM ghcr.io/m1k1o/neko/google-chrome:latest
 
 USER root
 
-RUN mkdir -p /var/run/pulse && chown -R neko:neko /var/run/pulse
+RUN mkdir -p /var/run/pulse /home/neko/.config/calltap-chrome \
+    && chown -R neko:neko /var/run/pulse /home/neko/.config/calltap-chrome
 
 COPY default.pa /etc/pulse/default.pa
 COPY supervisord.conf /etc/neko/supervisord/google-chrome.conf
