@@ -1,0 +1,11 @@
+# Replace with your domain(s). Phone browsers require HTTPS to share the mic.
+# Open TCP 80/443 and UDP 52000 (NEKO_WEBRTC_UDPMUX) in your VPS firewall.
+
+neko.example.com {
+	reverse_proxy 127.0.0.1:8080
+}
+
+calltap.example.com {
+	# Set CALLTAP_DASHBOARD_USER / CALLTAP_DASHBOARD_PASS in .env (or put Authelia/Cloudflare Access in front)
+	reverse_proxy 127.0.0.1:8090
+}

@@ -1,0 +1,58 @@
+services:
+  neko:
+    build:
+      context: ./docker/neko
+    restart: unless-stopped
+    shm_size: "2gb"
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+    ports:
+      # Bind web UI to localhost so Tailscale Serve or Caddy terminates HTTPS in front.
+      - "127.0.0.1:8080:8080"
+      # Single UDP + TCP mux port for WebRTC.
+      - "${NEKO_WEBRTC_UDPMUX:-52000}:${NEKO_WEBRTC_UDPMUX:-52000}/udp"
+      - "${NEKO_WEBRTC_TCPMUX:-52000}:${NEKO_WEBRTC_TCPMUX:-52000}/tcp"
+    environment:
+      NEKO_SERVER_BIND: ":8080"
+      NEKO_DESKTOP_SCREEN: "${NEKO_DESKTOP_SCREEN:-800x1600@30}"
+      NEKO_CAPTURE_MICROPHONE_ENABLED: "true"
+      NEKO_CAPTURE_MICROPHONE_DEVICE: "audio_input"
+      NEKO_CAPTURE_AUDIO_DEVICE: "audio_output.monitor"
+      NEKO_MEMBER_MULTIUSER_USER_PASSWORD: "${NEKO_USER_PASSWORD:-change-me-user}"
+      NEKO_MEMBER_MULTIUSER_ADMIN_PASSWORD: "${NEKO_ADMIN_PASSWORD:-change-me-admin}"
+      NEKO_WEBRTC_UDPMUX: "${NEKO_WEBRTC_UDPMUX:-52000}"
+      NEKO_WEBRTC_TCPMUX: "${NEKO_WEBRTC_TCPMUX:-52000}"
+      NEKO_WEBRTC_NAT1TO1: "${NEKO_WEBRTC_NAT1TO1:-}"
+      NEKO_WEBRTC_ICELITE: "true"
+      NEKO_SESSION_IMPLICIT_HOSTING: "true"
+    volumes:
+      - chrome_profile:/home/neko/.config/calltap-chrome
+      - pulse_sock:/var/run/pulse
+
+  calltap:
+    build:
+      context: .
+      dockerfile: docker/calltap/Dockerfile
+    restart: unless-stopped
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+    depends_on:
+      - neko
+    ports:
+      - "127.0.0.1:8090:8090"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      CALLTAP_PULSE_SERVER: "unix:/var/run/pulse/pulseaudio.socket"
+      CALLTAP_CDP_URL: "http://neko:9222"
+    volumes:
+      - pulse_sock:/var/run/pulse
+      - ./data:/data
+      - ./rclone:/config/rclone
+
+volumes:
+  chrome_profile:
+  pulse_sock:

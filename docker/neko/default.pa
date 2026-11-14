@@ -1,0 +1,16 @@
+#!/usr/bin/pulseaudio -nF
+
+### Virtual speaker sink (Chrome plays AI agent audio here; monitor is audio_output.monitor)
+load-module module-null-sink sink_name=audio_output sink_properties=device.description="Virtual_Audio_Output"
+
+### Virtual mic sink (Neko WebRTC mic stream writes here; monitor is audio_input.monitor)
+load-module module-null-sink sink_name=audio_input sink_properties=device.description="Virtual_Audio_Input"
+
+### Virtual microphone source exposed to Chrome
+load-module module-virtual-source source_name=microphone master=audio_input.monitor source_properties=device.description="Virtual_Microphone"
+
+### Shared unix socket accessible to the CallTap sidecar via shared volume
+load-module module-native-protocol-unix socket=/var/run/pulse/pulseaudio.socket auth-anonymous=1
+
+### Always keep a fallback sink
+load-module module-always-sink

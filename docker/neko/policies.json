@@ -1,0 +1,22 @@
+{
+  "AutofillAddressEnabled": false,
+  "AutofillCreditCardEnabled": false,
+  "AutoplayAllowed": true,
+  "BrowserAddPersonEnabled": false,
+  "BrowserGuestModeEnabled": false,
+  "BrowserSignin": 1,
+  "CommandLineFlagSecurityWarningsEnabled": false,
+  "AudioCaptureAllowed": true,
+  "AudioCaptureAllowedUrls": ["*"],
+  "DefaultCookiesSetting": 1,
+  "DefaultNotificationsSetting": 2,
+  "DefaultPopupsSetting": 1,
+  "DeveloperToolsAvailability": 1,
+  "EditBookmarksEnabled": true,
+  "FullscreenAllowed": true,
+  "IncognitoModeAvailability": 1,
+  "PasswordManagerEnabled": true,
+  "PromptForDownloadLocation": false,
+  "SyncDisabled": false,
+  "VideoCaptureAllowed": true
+}

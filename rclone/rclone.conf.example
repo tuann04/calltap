@@ -1,0 +1,44 @@
+# Copy this file to rclone/rclone.conf and fill in the section for your provider.
+# Then set CALLTAP_RCLONE_REMOTE in .env (e.g. "r2:calltap-calls").
+
+# --- Cloudflare R2 (recommended: zero egress fees) ---
+[r2]
+type = s3
+provider = Cloudflare
+access_key_id = YOUR_R2_ACCESS_KEY_ID
+secret_access_key = YOUR_R2_SECRET_ACCESS_KEY
+endpoint = https://YOUR_ACCOUNT_ID.r2.cloudflarestorage.com
+acl = private
+
+# --- Amazon S3 ---
+[s3]
+type = s3
+provider = AWS
+env_auth = false
+access_key_id = YOUR_AWS_ACCESS_KEY
+secret_access_key = YOUR_AWS_SECRET_KEY
+region = us-east-1
+acl = private
+
+# --- Google Cloud Storage ---
+# Note: put your service account JSON in rclone/gcs-sa.json
+[gcs]
+type = google cloud storage
+service_account_file = /config/rclone/gcs-sa.json
+project_number = YOUR_PROJECT_NUMBER
+bucket_policy_only = true
+
+# --- Google Drive ---
+# Run `docker compose exec calltap rclone config --config /config/rclone/rclone.conf`
+# (or on your laptop: `docker run --rm -it --network host -v ./rclone:/config/rclone calltap-calltap rclone config --config /config/rclone/rclone.conf`)
+# to generate the OAuth token below, then set CALLTAP_RCLONE_REMOTE=gdrive:CallTap
+[gdrive]
+type = drive
+scope = drive.file
+token = {"access_token":"...","token_type":"Bearer","refresh_token":"...","expiry":"..."}
+
+# --- Backblaze B2 ---
+[b2]
+type = b2
+account = YOUR_B2_KEY_ID
+key = YOUR_B2_APPLICATION_KEY
