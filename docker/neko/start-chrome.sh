@@ -39,6 +39,7 @@ exec /usr/bin/google-chrome \
   --no-first-run \
   --no-default-browser-check \
   --start-maximized \
+  --force-device-scale-factor="${CHROME_SCALE_FACTOR:-2}" \
   --autoplay-policy=no-user-gesture-required \
   --remote-debugging-address=0.0.0.0 \
   --remote-debugging-port=9222 \

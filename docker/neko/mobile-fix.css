@@ -1,0 +1,138 @@
+/* Mobile responsiveness overrides for Neko web UI (leaves desktop > 768px untouched). */
+@media only screen and (max-width: 768px) {
+  html,
+  body,
+  #root,
+  #neko {
+    width: 100% !important;
+    max-width: 100vw !important;
+    min-width: 0 !important;
+    overflow-x: hidden !important;
+  }
+
+  #neko {
+    height: 100dvh !important;
+    max-height: 100dvh !important;
+    overflow: hidden !important;
+  }
+
+  #neko > main {
+    min-width: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    height: 100dvh !important;
+    max-height: 100dvh !important;
+    overflow-x: hidden !important;
+  }
+
+  @media (orientation: portrait) {
+    #neko:has(aside[data-testid="side"]) > main {
+      height: 40dvh !important;
+      max-height: 40dvh !important;
+    }
+
+    #neko > aside[data-testid="side"] {
+      width: 100% !important;
+      max-width: 100% !important;
+      height: 60dvh !important;
+      max-height: 60dvh !important;
+    }
+  }
+
+  /* Compact header so brand + all action buttons fit cleanly down to 320px width */
+  [data-testid="header"] {
+    height: 36px !important;
+    padding: 0 6px !important;
+    max-width: 100% !important;
+    overflow: hidden !important;
+  }
+
+  [data-testid="header"] > div {
+    min-width: 0 !important;
+    gap: 6px;
+  }
+
+  [data-testid="header"] a {
+    margin-left: 4px !important;
+    width: auto !important;
+    min-width: 0 !important;
+    flex: 1 1 auto !important;
+    overflow: hidden;
+  }
+
+  [data-testid="header"] a img {
+    height: 22px !important;
+    width: auto !important;
+    margin-right: 6px !important;
+    flex-shrink: 0;
+  }
+
+  [data-testid="header"] a span {
+    font-size: 18px !important;
+    line-height: 22px !important;
+    white-space: nowrap;
+  }
+
+  [data-testid="header"] ul {
+    margin-right: 0 !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 4px !important;
+    flex-shrink: 0 !important;
+  }
+
+  [data-testid="header"] ul > li {
+    margin-right: 0 !important;
+    display: inline-flex !important;
+  }
+
+  [data-testid="header"] ul > li button {
+    width: 28px !important;
+    height: 28px !important;
+    padding: 0 !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+  }
+
+  /* Keep video area strictly constrained and shrink huge 120px tap-to-unmute icon */
+  .video-container {
+    min-width: 0 !important;
+    min-height: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    overflow: hidden !important;
+  }
+
+  .video-container ul.right-5 {
+    top: 8px !important;
+    right: 8px !important;
+  }
+
+  .video-container ul.right-5 > li {
+    margin-bottom: 6px !important;
+  }
+
+  [data-testid="player-overlay"] svg {
+    width: 48px !important;
+    height: 48px !important;
+    padding: 10px !important;
+    border-radius: 9999px !important;
+    background: rgba(15, 23, 42, 0.72) !important;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45) !important;
+  }
+
+  /* Keep connection/status toasts compact inside narrow mobile viewports */
+  [data-sonner-toaster] {
+    --width: min(260px, calc(100vw - 16px)) !important;
+    top: 42px !important;
+    left: 8px !important;
+  }
+
+  [data-sonner-toast] {
+    padding: 6px 10px !important;
+    font-size: 12px !important;
+    border-radius: 6px !important;
+    opacity: 0.92 !important;
+  }
+}
