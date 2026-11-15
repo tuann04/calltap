@@ -10,6 +10,7 @@ COPY supervisord.conf /etc/neko/supervisord/google-chrome.conf
 COPY policies.json /etc/opt/chrome/policies/managed/policies.json
 COPY preferences.json /etc/neko/chrome-preferences.seed.json
 COPY start-chrome.sh /etc/neko/start-chrome.sh
-RUN chmod +x /etc/neko/start-chrome.sh
+COPY cdp-proxy.py /etc/neko/cdp-proxy.py
+RUN chmod +x /etc/neko/start-chrome.sh /etc/neko/cdp-proxy.py
 
 ENV PULSE_SERVER=unix:/var/run/pulse/pulseaudio.socket
