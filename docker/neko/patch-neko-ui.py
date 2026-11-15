@@ -86,6 +86,52 @@ def patch_app_js() -> dict[str, str]:
         'this.state.video.muted=this.video.muted,this.emitState()}}'
     )
 
+    old_ci = (
+        'function ci(){const{t:s}=V(),{client:e,app:t}=O(),o=ne(),i=k(e.store,Y),a=k(e.store,c=>c.settings),'
+        'l=k(t,c=>c.side),r=Ae("header.item"),d=Ae("side.tab"),p=(c,h)=>{const f=ye(c,a),'
+        'b=s(i?`locks.${c}.${f?"unlock":"lock"}`:`locks.${c}.${f?"locked":"unlocked"}`);return n.jsx("li",{'
+        'className:"mr-2.5 inline-block",children:n.jsx(A,{variant:"header",label:b,className:F(f&&"text-style-error/50"),'
+        '"data-testid":`lock-${c}`,"data-locked":f||void 0,"aria-disabled":!i,onClick:()=>i&&o.toggleLock(c),children:h})})};'
+        'return n.jsxs("div",{className:"flex flex-1 flex-row items-center",children:[n.jsxs("a",{'
+        'href:"https://github.com/m1k1o/neko",title:"Github repository",target:"_blank",rel:"noreferrer",'
+        'className:"ml-5 flex w-[150px] flex-1 items-center justify-start",children:[n.jsx("img",{src:ke,alt:"n.eko",'
+        'className:"mr-2.5 block h-7.5"}),n.jsxs("span",{className:"text-[30px] leading-7.5",children:['
+        'n.jsx("b",{className:"font-black",children:"n"}),".eko"]})]}),n.jsxs("ul",{className:"mr-2.5 whitespace-nowrap",'
+        'children:[p("control",n.jsx(Tt,{className:"size-4"})),p("login",ye("login",a)?n.jsx(St,{className:"size-4"}):'
+        'n.jsx(Ct,{className:"size-4"})),r.map(({id:c,component:h})=>n.jsx(h,{},c)),n.jsx(Ze,{items:d,'
+        'use:c=>c.useBadge??li,children:c=>n.jsx(di,{side:l,unread:c.reduce((h,f)=>h+f,0)})})]})]})}'
+    )
+
+    new_ci = (
+        'function ci(){const{t:s}=V(),{client:e,app:t}=O(),o=ne(),i=k(e.store,Y),a=k(e.store,c=>c.settings),'
+        '{muted:z,connected:cn,canShareMedia:cm}=k(e.store,Z(c=>({muted:c.video.muted,'
+        'connected:c.connection.status==="connected",canShareMedia:!!Pe(c)?.profile.can_share_media}))),'
+        '[mo,ms2]=v.useState(()=>!!window.__nekoMicOn),'
+        'l=k(t,c=>c.side),r=Ae("header.item"),d=Ae("side.tab");'
+        'v.useEffect(()=>{const h=()=>ms2(!!window.__nekoMicOn);return window.addEventListener("neko-mic",h),'
+        '()=>window.removeEventListener("neko-mic",h)},[]);'
+        'const p=(c,h)=>{const f=ye(c,a),'
+        'b=s(i?`locks.${c}.${f?"unlock":"lock"}`:`locks.${c}.${f?"locked":"unlocked"}`);return n.jsx("li",{'
+        'className:"mr-2.5 inline-block",children:n.jsx(A,{variant:"header",label:b,className:F(f&&"text-style-error/50"),'
+        '"data-testid":`lock-${c}`,"data-locked":f||void 0,"aria-disabled":!i,onClick:()=>i&&o.toggleLock(c),children:h})})};'
+        'return n.jsxs("div",{className:"flex flex-1 flex-row items-center",children:[n.jsxs("a",{'
+        'href:"https://github.com/m1k1o/neko",title:"Github repository",target:"_blank",rel:"noreferrer",'
+        'className:"ml-5 flex w-[150px] flex-1 items-center justify-start",children:[n.jsx("img",{src:ke,alt:"n.eko",'
+        'className:"mr-2.5 block h-7.5"}),n.jsxs("span",{className:"text-[30px] leading-7.5",children:['
+        'n.jsx("b",{className:"font-black",children:"n"}),".eko"]})]}),n.jsxs("ul",{className:"mr-2.5 whitespace-nowrap",'
+        'children:[n.jsx("li",{className:"mr-2.5 phone:inline-flex hidden",children:n.jsx(A,{variant:"header",'
+        'label:z?"Unmute":"Mute","data-testid":"header-mute","data-muted":z||void 0,'
+        'onClick:()=>{z?(e.unmute(),e.play().catch(()=>{})):e.mute()},'
+        'children:z?n.jsx(en,{className:"size-4"}):n.jsx(It,{className:"size-4"})})}),'
+        'cn&&cm&&n.jsx("li",{className:"mr-2.5 phone:inline-flex hidden",children:n.jsx(A,{variant:"header",'
+        'label:s(mo?"controls.mic_off":"controls.mic_on"),"data-testid":"header-mic","data-on":mo||void 0,'
+        'onClick:()=>window.__nekoToggleMic?.(),'
+        'children:mo?n.jsx(Xs,{className:"size-4"}):n.jsx(Qs,{className:"size-4"})})}),'
+        'p("control",n.jsx(Tt,{className:"size-4"})),p("login",ye("login",a)?n.jsx(St,{className:"size-4"}):'
+        'n.jsx(Ct,{className:"size-4"})),r.map(({id:c,component:h})=>n.jsx(h,{},c)),n.jsx(Ze,{items:d,'
+        'use:c=>c.useBadge??li,children:c=>n.jsx(di,{side:l,unread:c.reduce((h,f)=>h+f,0)})})]})]})}'
+    )
+
     old_li = (
         'function Li({hideControls:s,extraControls:e}){const{t}=V(),{client:o,overlay:i,app:a}=O(),l=ne(),'
         '{admin:r,hosting:d,hosted:p,implicit:c,lockedControls:h,video:f}=k(o.store,Z(P=>({'
@@ -119,15 +165,18 @@ def patch_app_js() -> dict[str, str]:
         'lockedControls:P.settings.locked_controls,video:P.video,connected:P.connection.status==="connected",'
         'canShareMedia:!!Pe(P)?.profile.can_share_media}))),b=k(a,P=>P.emotes),w=v.useRef(null),'
         '{fullscreen:C,request:N}=Ai(w),_=Ii(),U=Pi(),m=h&&!r,{playing:S,playable:T,muted:z,mutedByAutoplay:K}=f,'
-        'G=e?"":"phone:block hidden",mr=v.useRef(null),[mo,ms2]=v.useState(!1),mg=d&&cm&&!!navigator.mediaDevices,'
-        'mx=(q)=>{mr.current&&(mr.current.stop(),mr.current.track?.stop(),mr.current=null,ms2(!1),q&&Q(t("controls.mic_off"),"Microphone muted"))};'
-        'v.useEffect(()=>{(!mg||!cn)&&mx(!1)},[mg,cn]);v.useEffect(()=>()=>mx(!1),[]);'
+        'G=e?"":"phone:block hidden",mr=v.useRef(null),[mo,ms2]=v.useState(!1),'
+        'syncMic=q=>{ms2(q),window.__nekoMicOn=q,window.dispatchEvent(new Event("neko-mic"))},'
+        'mx=(q)=>{mr.current&&(mr.current.stop(),mr.current.track?.stop(),mr.current=null,syncMic(!1),q&&Q(t("controls.mic_off"),"Microphone muted"))};'
+        'v.useEffect(()=>{!cn&&mx(!1)},[cn]);v.useEffect(()=>()=>mx(!1),[]);'
         'const ml=async(P)=>{P?.stopPropagation?.();if(mr.current)return mx(!0);try{'
-        'if(!navigator.mediaDevices?.getUserMedia)throw new Error("getUserMedia unavailable");'
+        'o.controlling||o.request();'
+        'if(!navigator.mediaDevices?.getUserMedia)throw new Error("getUserMedia unavailable in this browser");'
         'const M=await navigator.mediaDevices.getUserMedia({audio:!0}),he=M.getAudioTracks()[0];'
         'if(!he)throw new Error("No audio input track returned");'
-        'mr.current={track:he,stop:o.shareMedia(M)},ms2(!0),Q(t("controls.mic_on"),"Microphone live")}catch(M){'
+        'mr.current={track:he,stop:o.shareMedia(M)},syncMic(!0),Q(t("controls.mic_on"),"Microphone live")}catch(M){'
         'const mg2=M?.message||String(M);console.error("[neko-mobile] mic error",M),Q(t("controls.mic_error"),mg2,"error"),Oe(a,t("controls.mic_error"),mg2)}};'
+        'window.__nekoToggleMic=ml;'
         'return n.jsx("div",{className:"relative h-full w-full",'
         'children:n.jsxs("div",{ref:w,className:"absolute inset-0 flex items-center justify-center bg-black",'
         'children:[n.jsxs("div",{className:"absolute inset-0","data-testid":"player",onMouseEnter:_,'
@@ -150,7 +199,7 @@ def patch_app_js() -> dict[str, str]:
         'label:z?"Unmute":"Mute","data-testid":"mobile-mute","data-muted":z||void 0,'
         'className:F(z&&"text-style-error"),onClick:P=>{P.stopPropagation(),z?(o.unmute(),o.play().catch(()=>{})):o.mute()},'
         'children:z?n.jsx(en,{className:"size-4"}):n.jsx(It,{className:"size-4"})})}),'
-        'mg&&n.jsx("li",{className:F("mb-2.5 last:mb-0",G),children:n.jsx(A,{variant:"video",'
+        'cn&&cm&&n.jsx("li",{className:F("mb-2.5 last:mb-0",G),children:n.jsx(A,{variant:"video",'
         'label:t(mo?"controls.mic_off":"controls.mic_on"),"data-testid":"mobile-mic","data-on":mo||void 0,'
         'onClick:ml,children:mo?n.jsx(Xs,{className:"size-4"}):n.jsx(Qs,{className:"size-4"})})}),'
         '!m&&!c&&n.jsx("li",{className:F("mb-2.5 last:mb-0",G),children:n.jsx(A,{variant:"video",'
@@ -165,9 +214,11 @@ def patch_app_js() -> dict[str, str]:
             continue
         assert js.count(old_touch_block) == 1, f"Expected 1 onTouch/onControl match in {js_path}"
         assert js.count(old_set_muted) == 1, f"Expected 1 setMuted match in {js_path}"
+        assert js.count(old_ci) == 1, f"Expected 1 ci() match in {js_path}"
         assert js.count(old_li) == 1, f"Expected 1 Li() match in {js_path}"
         js = js.replace(old_touch_block, new_touch_block, 1)
         js = js.replace(old_set_muted, new_set_muted, 1)
+        js = js.replace(old_ci, new_ci, 1)
         js = js.replace(old_li, new_li, 1)
         js_hash = hashlib.sha256(js.encode("utf-8")).hexdigest()[:8]
         new_path = js_path.with_name(f"index-{js_hash}.js")
