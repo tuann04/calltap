@@ -127,6 +127,15 @@
     margin-bottom: 6px !important;
   }
 
+  .video-container ul.right-5 > li button {
+    width: 34px !important;
+    height: 34px !important;
+    padding: 0 !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+  }
+
   [data-testid="mobile-mute"][data-muted="true"] {
     background: rgba(220, 38, 38, 0.85) !important;
     color: #fff !important;

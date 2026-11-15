@@ -6,7 +6,7 @@ from pathlib import Path
 WWW_DIR = Path("/var/www")
 
 
-def patch_index_html() -> None:
+def patch_index_html(js_renames: dict[str, str]) -> None:
     index_path = WWW_DIR / "index.html"
     html = index_path.read_text("utf-8")
 
@@ -17,18 +17,27 @@ def patch_index_html() -> None:
     elif new_vp not in html:
         raise RuntimeError("viewport meta tag not found in index.html")
 
-    css_path = WWW_DIR / "mobile-fix.css"
-    css_ver = hashlib.sha256(css_path.read_bytes()).hexdigest()[:8] if css_path.exists() else "1"
-    css_tag = f'    <link rel="stylesheet" href="./mobile-fix.css?v={css_ver}">'
+    for old_name, new_name in js_renames.items():
+        assert old_name in html, f"Expected {old_name} reference in index.html"
+        html = html.replace(old_name, new_name)
 
-    if "mobile-fix.css" not in html:
+    css_path = WWW_DIR / "mobile-fix.css"
+    if css_path.exists():
+        css_hash = hashlib.sha256(css_path.read_bytes()).hexdigest()[:8]
+        hashed_css = f"mobile-fix.{css_hash}.css"
+        css_path.rename(WWW_DIR / hashed_css)
+    else:
+        hashed_css = "mobile-fix.css"
+
+    css_tag = f'    <link rel="stylesheet" href="./{hashed_css}">'
+    if "mobile-fix" not in html:
         assert "</head>" in html, "</head> not found in index.html"
         html = html.replace("</head>", f"{css_tag}\n  </head>", 1)
 
     index_path.write_text(html, "utf-8")
 
 
-def patch_app_js() -> None:
+def patch_app_js() -> dict[str, str]:
     candidates = sorted((WWW_DIR / "assets").glob("index-*.js"))
     if not candidates:
         raise RuntimeError("No /var/www/assets/index-*.js bundle found")
@@ -145,7 +154,7 @@ def patch_app_js() -> None:
         '!p&&!d&&"text-text-normal/40"),onClick:()=>T&&l.toggleControl(),children:n.jsx(Tt,{className:"size-4"})})})]})'
     )
 
-    patched = False
+    renames: dict[str, str] = {}
     for js_path in candidates:
         js = js_path.read_text("utf-8")
         if old_touch_block not in js:
@@ -156,14 +165,19 @@ def patch_app_js() -> None:
         js = js.replace(old_touch_block, new_touch_block, 1)
         js = js.replace(old_set_muted, new_set_muted, 1)
         js = js.replace(old_li, new_li, 1)
-        js_path.write_text(js, "utf-8")
-        patched = True
-        print(f"Patched Neko UI bundle: {js_path}")
+        js_hash = hashlib.sha256(js.encode("utf-8")).hexdigest()[:8]
+        new_path = js_path.with_name(f"index-{js_hash}.js")
+        new_path.write_text(js, "utf-8")
+        if new_path != js_path:
+            js_path.unlink()
+        renames[js_path.name] = new_path.name
+        print(f"Patched Neko UI bundle: {js_path.name} -> {new_path.name}")
 
-    if not patched:
+    if not renames:
         raise RuntimeError("Did not find expected Neko bundle patterns in /var/www/assets/index-*.js")
+    return renames
 
 
 if __name__ == "__main__":
-    patch_index_html()
-    patch_app_js()
+    js_renames = patch_app_js()
+    patch_index_html(js_renames)
