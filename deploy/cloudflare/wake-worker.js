@@ -47,7 +47,7 @@ export default {
     if (url.pathname === "/status") {
       const token = await getAzureToken(env);
       const power = await vmInstanceView(env, token);
-      return Response.json({ vmState: power, booting: power === "VM starting" });
+      return Response.json({ vmState: power, booting: power === "PowerState/starting" });
     }
 
     if (url.pathname === "/sleep" && request.method === "POST") {
@@ -71,11 +71,12 @@ export default {
     const token = await getAzureToken(env);
     const power = await vmInstanceView(env, token);
 
-    if (power === "VM running") {
+    const short = power.replace("PowerState/", "");
+    if (short === "running") {
       return Response.redirect(env.NEKO_ORIGIN, 302);
     }
 
-    if (power !== "VM deallocated" && power !== "VM stopping") {
+    if (short !== "deallocated" && short !== "stopping") {
       // starting / unknown: refresh until running
       return wakePage(env, power, 5);
     }

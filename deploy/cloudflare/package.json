@@ -1,0 +1,13 @@
+{
+  "name": "calltap-wake-worker",
+  "version": "1.0.0",
+  "description": "Cloudflare Worker that wakes the CallTap Azure VM",
+  "type": "module",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "devDependencies": {
+    "cf": "^1.0.0-beta.32",
+    "wrangler": "^4.162.0"
+  }
+}

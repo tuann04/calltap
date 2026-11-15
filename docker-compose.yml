@@ -7,6 +7,10 @@ services:
     dns:
       - 1.1.1.1
       - 8.8.8.8
+    env_file:
+      # TURN credentials rotated daily by /usr/local/bin/turn-rotate.sh.
+      - path: /var/lib/calltap/turn.env
+        required: false
     ports:
       # Bind web UI to localhost so Tailscale Serve or Caddy terminates HTTPS in front.
       - "127.0.0.1:8080:8080"
@@ -29,7 +33,6 @@ services:
       # JSON arrays, rotated daily by deploy/cloudflare/turn-rotate.timer.
       NEKO_WEBRTC_ICESERVERS_FRONTEND: "${NEKO_TURN_FRONTEND:-[]}"
       NEKO_WEBRTC_ICESERVERS_BACKEND: "${NEKO_TURN_BACKEND:-[]}"
-      NEKO_SESSION_IMPLICIT_HOSTING: "true"
     volumes:
       - chrome_profile:/home/neko/.config/calltap-chrome
       - pulse_sock:/var/run/pulse
