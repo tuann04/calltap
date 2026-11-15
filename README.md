@@ -107,6 +107,92 @@ sequenceDiagram
   end
 ```
 
+## Cloudflare deployment (Azure VM)
+
+Public endpoints on `tuann04.cloud`, no VPN or open ports needed on the client: `neko.tuann04.cloud` (remote Chrome), `calltap.tuann04.cloud` (dashboard), and `call.tuann04.cloud` (1-tap wake Worker). Full setup details in [deploy/cloudflare/README.md](deploy/cloudflare/README.md).
+
+```mermaid
+flowchart LR
+  subgraph client["iPhone / any browser"]
+    safari["Safari<br/>(no VPN needed)"]
+  end
+
+  subgraph cf["Cloudflare free tier"]
+    dns["tuann04.cloud DNS"]
+    worker["Worker: calltap-wake<br/>call.tuann04.cloud"]
+    tunnel["Tunnel: calltap<br/>neko + calltap subdomains"]
+    turn["Realtime TURN relay<br/>turn.cloudflare.com"]
+  end
+
+  subgraph azure["Azure: calltap-vm (east asia)"]
+    direction TB
+    subgraph dockernet["Docker compose network"]
+      neko["neko<br/>remote Chrome :8080"]
+      calltap["calltap<br/>recorder + dashboard :8090"]
+      cfd["cloudflared"]
+    end
+    nsg["NSG: only SSH/22"]
+  end
+
+  safari -->|HTTPS| dns
+  dns -->|"call."| worker
+  dns -->|"neko / calltap."| tunnel
+  worker -->|"Azure REST API<br/>start / deallocate"| azure
+  cfd <-->|"outbound QUIC tunnel"| tunnel
+  tunnel --> neko
+  tunnel --> calltap
+  safari <-.->|"WebRTC media<br/>direct or relayed"| turn
+  turn <-.-> neko
+  nsg -.- dockernet
+```
+
+### A call from the iPhone, step by step
+
+```mermaid
+sequenceDiagram
+  autonumber
+  actor U as iPhone (Safari)
+  participant W as Worker<br/>call.tuann04.cloud
+  participant AZ as Azure API
+  participant VM as calltap-vm
+  participant N as neko
+  participant T as TURN relay
+
+  U->>W: GET call.tuann04.cloud
+  alt VM deallocated
+    W->>AZ: start VM
+    AZ-->>VM: boot (~40s)
+    W-->>U: "Waking CallTap..." page
+    U->>W: auto-refresh
+  end
+  W-->>U: 302 redirect
+  U->>N: HTTPS signaling (via tunnel)
+  N-->>U: SDP offer + TURN credentials
+  U->>T: ICE connectivity check
+  T->>N: relayed media
+  Note over U,N: ICE picks direct if possible,<br/>TURN relay otherwise
+  VM->>VM: CallTap records mic + agent tracks
+  VM->>VM: idle 15 min, no session/upload<br/>-> deallocate
+```
+
+### Cost control (idle = $0/hour)
+
+```mermaid
+flowchart TB
+  subgraph vm["calltap-vm (systemd timers)"]
+    rotate["turn-rotate.timer<br/>daily 03:10 UTC + at boot"]
+    idle["idleness.timer<br/>every 5 min"]
+  end
+
+  rotate -->|"curl POST"| cfturn["Cloudflare TURN API<br/>fresh 24h credentials"]
+  cfturn -->|"write turn.env"| compose["docker compose env<br/>neko picks it up on restart"]
+
+  idle -->|"check sessions +<br/>pending uploads"| state{"active?"}
+  state -->|yes| reset["reset idle counter"]
+  state -->|"no, 15 min"| sleepapi["POST /sleep"]
+  sleepapi --> worker["Worker deallocates VM<br/>$0/hour"]
+```
+
 ## Quick start
 
 ```bash
