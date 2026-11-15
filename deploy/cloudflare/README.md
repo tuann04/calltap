@@ -4,9 +4,31 @@ Public entry points for CallTap, no Tailscale required on the client:
 
 | URL | Service | Path |
 |---|---|---|
-| `https://neko.tuann04.cloud` | neko remote browser (:8080) | Cloudflare Tunnel -> `http://neko:8080` |
-| `https://calltap.tuann04.cloud` | CallTap dashboard (:8090) | Cloudflare Tunnel -> `http://calltap:8090` |
+| `https://neko.tuann04.cloud` | neko remote browser (:8080) | Cloudflare Access -> Cloudflare Tunnel -> `http://neko:8080` |
+| `https://calltap.tuann04.cloud` | CallTap dashboard (:8090) | Cloudflare Access -> Cloudflare Tunnel -> `http://calltap:8090` |
 | `https://call.tuann04.cloud` | 1-tap wake Worker | Cloudflare Worker -> Azure API |
+
+## Authentication (Cloudflare Access + Passkeys)
+
+Both `neko.` and `calltap.` are behind Cloudflare Access (Zero Trust, free tier).
+Logging in requires a passkey (Face ID / fingerprint) or an emailed one-time PIN,
+both restricted to the account owner's email. In-app passwords
+(`NEKO_ADMIN_PASSWORD`, `CALLTAP_DASHBOARD_PASS`) remain as a second layer but are
+no longer the front door.
+
+Config (created via `cf`):
+
+- IdP: `passkeys` (auto-prompt on), uid `1cfcf42d-c00a-429d-986e-fe8085fb07f9`
+- App `CallTap Neko` -> `neko.tuann04.cloud`, 24h session
+- App `CallTap Dashboard` -> `calltap.tuann04.cloud`, 24h session
+- Policy on both: allow email `Voanhtuan2004@gmail.com`
+
+To enroll a passkey: open `https://neko.tuann04.cloud` in Safari, choose
+"Sign in with a passkey" -> "Don't have a passkey? Set one up", verify with OTP,
+then save the passkey to iCloud Keychain.
+
+First login from the iPhone needs the OTP path; after the passkey is enrolled,
+subsequent logins are Face ID only.
 
 Cloudflare resources (already created in the account):
 
