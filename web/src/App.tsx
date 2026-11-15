@@ -80,6 +80,10 @@ export const App: React.FC = () => {
       root.classList.remove("dark");
     }
     localStorage.setItem("calltap-theme", theme);
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) {
+      meta.setAttribute("content", theme === "dark" ? "#000000" : "#ffffff");
+    }
   }, [theme]);
 
   const fetchAll = useCallback(async (quiet = true) => {
@@ -316,26 +320,37 @@ export const App: React.FC = () => {
     remote_label: "Local storage only",
   };
 
+  const activeTabLabel =
+    status?.active_tab?.service && status.active_tab.service !== "unknown"
+      ? status.active_tab.service
+      : extractHostname(status?.active_tab?.url ?? null);
+
   return (
-    <div className="min-h-screen bg-[var(--ds-bg)] text-[var(--ds-fg)]">
+    <div className="min-h-dvh bg-[var(--ds-bg)] text-[var(--ds-fg)]">
       {/* Sticky Geist Navbar */}
-      <header className="sticky top-0 z-30 border-b border-[var(--ds-border)] bg-[var(--ds-bg)]/85 backdrop-blur-md">
-        <div className="mx-auto flex h-14 max-w-5xl items-center justify-between gap-3 px-4 sm:px-6">
-          <div className="flex items-center gap-3">
-            {/* Vercel-inspired triangle + pulse mark */}
-            <div className="flex h-7 w-7 items-center justify-center rounded-md bg-[var(--ds-btn-primary-bg)] text-[var(--ds-btn-primary-fg)]">
+      <header className="sticky top-0 z-30 border-b border-[var(--ds-border)] bg-[var(--ds-bg)]/85 pt-[env(safe-area-inset-top)] backdrop-blur-md">
+        <div className="mx-auto flex h-13 sm:h-14 max-w-5xl items-center justify-between gap-2 px-3 sm:px-6">
+          <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
+            {/* Vercel-inspired pulse mark */}
+            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-[var(--ds-btn-primary-bg)] text-[var(--ds-btn-primary-fg)]">
               <Radio className="h-4 w-4" />
             </div>
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-semibold tracking-tight">CallTap</span>
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="truncate text-sm font-semibold tracking-tight">CallTap</span>
+              <span
+                className={`h-2 w-2 shrink-0 rounded-full md:hidden ${
+                  status?.pulse_healthy ? "bg-emerald-500" : "bg-red-500"
+                }`}
+                title={status?.pulse_healthy ? "Audio ready" : "Pulse offline"}
+              />
               <span className="hidden sm:inline-block rounded-full border border-[var(--ds-border)] px-2 py-0.5 font-mono text-[10px] text-[var(--ds-fg-muted)]">
                 dual-track
               </span>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            {/* PulseAudio + Browser Tab pill */}
+          <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+            {/* PulseAudio + Browser Tab pill (desktop) */}
             <div className="hidden md:flex items-center gap-2 rounded-full border border-[var(--ds-border)] bg-[var(--ds-surface)] px-3 py-1 text-xs">
               <span
                 className={`h-2 w-2 rounded-full ${
@@ -345,14 +360,11 @@ export const App: React.FC = () => {
               <span className="text-[var(--ds-fg-secondary)]">
                 {status?.pulse_healthy ? "Audio ready" : "Pulse offline"}
               </span>
-              {(status?.active_tab?.url ||
-                (status?.active_tab?.service && status.active_tab.service !== "unknown")) && (
+              {activeTabLabel && (
                 <>
                   <span className="text-[var(--ds-border-strong)]">/</span>
                   <span className="max-w-[140px] truncate font-mono text-[11px] text-[var(--ds-fg)]">
-                    {status.active_tab.service !== "unknown"
-                      ? status.active_tab.service
-                      : extractHostname(status.active_tab.url) ?? "unknown"}
+                    {activeTabLabel}
                   </span>
                 </>
               )}
@@ -362,7 +374,7 @@ export const App: React.FC = () => {
             <button
               type="button"
               onClick={() => setStorageModalOpen(true)}
-              className={`inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition cursor-pointer ${
+              className={`inline-flex h-9 sm:h-8 items-center gap-1.5 rounded-full border px-2.5 sm:px-3 text-xs font-medium transition cursor-pointer ${
                 cloudConnected
                   ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/15"
                   : "border-[var(--ds-border)] bg-[var(--ds-surface)] text-[var(--ds-fg-secondary)] hover:border-[var(--ds-border-strong)] hover:text-[var(--ds-fg)]"
@@ -370,19 +382,20 @@ export const App: React.FC = () => {
               title="Configure cloud storage destination"
             >
               {cloudConnected ? (
-                <Cloud className="h-3.5 w-3.5" />
+                <Cloud className="h-3.5 w-3.5 shrink-0" />
               ) : (
-                <HardDrive className="h-3.5 w-3.5" />
+                <HardDrive className="h-3.5 w-3.5 shrink-0" />
               )}
-              <span className="max-w-[160px] truncate">
-                {cloudConnected ? storageView.remote_label : "Local Only"}
+              <span className="max-w-[96px] sm:max-w-[160px] truncate">
+                {cloudConnected ? storageView.remote_label : "Local"}
+                <span className="hidden sm:inline">{!cloudConnected && " Only"}</span>
               </span>
             </button>
 
             <button
               type="button"
               onClick={() => fetchAll(false)}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[var(--ds-fg-secondary)] hover:border-[var(--ds-border-strong)] hover:text-[var(--ds-fg)] cursor-pointer"
+              className="inline-flex h-9 w-9 sm:h-8 sm:w-8 items-center justify-center rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[var(--ds-fg-secondary)] hover:border-[var(--ds-border-strong)] hover:text-[var(--ds-fg)] cursor-pointer"
               title="Refresh"
             >
               <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />
@@ -391,7 +404,7 @@ export const App: React.FC = () => {
             <button
               type="button"
               onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[var(--ds-fg-secondary)] hover:border-[var(--ds-border-strong)] hover:text-[var(--ds-fg)] cursor-pointer"
+              className="inline-flex h-9 w-9 sm:h-8 sm:w-8 items-center justify-center rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[var(--ds-fg-secondary)] hover:border-[var(--ds-border-strong)] hover:text-[var(--ds-fg)] cursor-pointer"
               title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
             >
               {theme === "dark" ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
@@ -400,14 +413,31 @@ export const App: React.FC = () => {
         </div>
       </header>
 
-      <main className="mx-auto max-w-5xl space-y-6 px-4 py-6 sm:px-6">
+      <main className="mx-auto max-w-5xl space-y-5 sm:space-y-6 px-3 py-4 sm:px-6 sm:py-6">
         {/* Recorder Hero Card */}
         <section className="rounded-xl border border-[var(--ds-border)] bg-[var(--ds-card)] shadow-xs">
-          <div className="p-5">
+          {/* Compact mobile audio + tab telemetry strip */}
+          <div className="flex md:hidden items-center justify-between gap-2 border-b border-[var(--ds-border)] bg-[var(--ds-surface)] px-4 py-2 text-xs rounded-t-xl">
+            <span className="inline-flex items-center gap-1.5 text-[var(--ds-fg-secondary)]">
+              <span
+                className={`h-2 w-2 rounded-full ${
+                  status?.pulse_healthy ? "bg-emerald-500" : "bg-red-500"
+                }`}
+              />
+              {status?.pulse_healthy ? "Audio ready" : "Pulse offline"}
+            </span>
+            {activeTabLabel && (
+              <span className="max-w-[170px] truncate rounded bg-[var(--ds-muted)] px-2 py-0.5 font-mono text-[11px] text-[var(--ds-fg)]">
+                {activeTabLabel}
+              </span>
+            )}
+          </div>
+
+          <div className="p-4 sm:p-5">
             {status?.active_call ? (
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
+                <div className="min-w-0 space-y-1">
+                  <div className="flex flex-wrap items-center gap-2">
                     <span className="inline-flex items-center gap-1.5 rounded-full border border-red-500/40 bg-red-500/10 px-2.5 py-0.5 text-[11px] font-medium text-red-500">
                       <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse" />
                       LIVE RECORDING
@@ -416,23 +446,23 @@ export const App: React.FC = () => {
                       {formatServiceLabel(status.active_call.service, status.active_call.page_url)}
                     </span>
                   </div>
-                  <h1 className="text-base font-semibold text-[var(--ds-fg)]">
+                  <h1 className="truncate text-base font-semibold text-[var(--ds-fg)]">
                     {formatCallTitle(status.active_call)}
                   </h1>
-                  <p className="font-mono text-xs text-[var(--ds-fg-muted)]">
+                  <p className="truncate font-mono text-xs text-[var(--ds-fg-muted)]">
                     {status.active_call.page_url || "Capturing microphone + browser audio"}
                   </p>
                 </div>
 
                 <div className="flex items-center gap-3">
-                  <div className="rounded-lg border border-[var(--ds-border)] bg-[var(--ds-surface)] px-4 py-2 font-mono text-lg font-semibold tabular-nums text-[var(--ds-fg)]">
+                  <div className="rounded-lg border border-[var(--ds-border)] bg-[var(--ds-surface)] px-4 py-2 font-mono text-xl sm:text-lg font-semibold tabular-nums text-[var(--ds-fg)]">
                     {elapsedText}
                   </div>
                   <button
                     type="button"
                     disabled={stopping}
                     onClick={handleStop}
-                    className="inline-flex h-10 items-center gap-2 rounded-lg bg-red-600 px-4 text-xs font-semibold text-white hover:bg-red-500 disabled:opacity-50 cursor-pointer"
+                    className="inline-flex h-11 sm:h-10 flex-1 sm:flex-initial items-center justify-center gap-2 rounded-lg bg-red-600 px-4 text-xs font-semibold text-white hover:bg-red-500 disabled:opacity-50 cursor-pointer"
                   >
                     {stopping ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
@@ -455,7 +485,7 @@ export const App: React.FC = () => {
                   <select
                     value={serviceChoice}
                     onChange={(e) => setServiceChoice(e.target.value)}
-                    className="h-9 w-full rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-3 text-xs font-medium text-[var(--ds-fg)] focus:border-[var(--ds-fg)] focus:outline-none"
+                    className="h-11 sm:h-9 w-full rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-3 text-xs font-medium text-[var(--ds-fg)] focus:border-[var(--ds-fg)] focus:outline-none"
                   >
                     <option value="auto">Auto-detect (from tab)</option>
                     <option value="sesame">Sesame</option>
@@ -474,19 +504,19 @@ export const App: React.FC = () => {
                     value={newTitle}
                     onChange={(e) => setNewTitle(e.target.value)}
                     placeholder="e.g., Evening English practice with Maya"
-                    className="h-9 w-full rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-3 text-xs text-[var(--ds-fg)] placeholder:text-[var(--ds-fg-muted)] focus:border-[var(--ds-fg)] focus:outline-none"
+                    className="h-11 sm:h-9 w-full rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-3 text-xs text-[var(--ds-fg)] placeholder:text-[var(--ds-fg-muted)] focus:border-[var(--ds-fg)] focus:outline-none"
                   />
                 </div>
 
                 <button
                   type="submit"
                   disabled={starting}
-                  className="inline-flex h-9 shrink-0 items-center justify-center gap-2 rounded-md bg-[var(--ds-btn-primary-bg)] px-4 text-xs font-semibold text-[var(--ds-btn-primary-fg)] hover:bg-[var(--ds-btn-primary-hover)] disabled:opacity-50 cursor-pointer"
+                  className="inline-flex h-11 sm:h-9 w-full sm:w-auto shrink-0 items-center justify-center gap-2 rounded-md bg-[var(--ds-btn-primary-bg)] px-4 text-xs font-semibold text-[var(--ds-btn-primary-fg)] hover:bg-[var(--ds-btn-primary-hover)] disabled:opacity-50 cursor-pointer"
                 >
                   {starting ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    <Loader2 className="h-4 w-4 sm:h-3.5 sm:w-3.5 animate-spin" />
                   ) : (
-                    <Mic className="h-3.5 w-3.5" />
+                    <Mic className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
                   )}
                   <span>Start Recording</span>
                 </button>
@@ -494,13 +524,13 @@ export const App: React.FC = () => {
             )}
           </div>
 
-          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--ds-border)] bg-[var(--ds-surface)] px-5 py-2.5 text-xs text-[var(--ds-fg-muted)] rounded-b-xl">
-            <label className="inline-flex cursor-pointer items-center gap-2">
+          <div className="flex flex-col items-start gap-2.5 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between border-t border-[var(--ds-border)] bg-[var(--ds-surface)] px-4 sm:px-5 py-3 sm:py-2.5 text-xs text-[var(--ds-fg-muted)] rounded-b-xl">
+            <label className="inline-flex cursor-pointer items-center gap-2.5">
               <input
                 type="checkbox"
                 checked={Boolean(status?.auto_detect)}
                 onChange={handleToggleAutoDetect}
-                className="h-3.5 w-3.5 accent-[var(--ds-fg)] cursor-pointer"
+                className="h-4 w-4 sm:h-3.5 sm:w-3.5 accent-[var(--ds-fg)] cursor-pointer"
               />
               <span className="text-[var(--ds-fg-secondary)]">
                 Auto-detect calls from browser microphone
@@ -510,20 +540,20 @@ export const App: React.FC = () => {
             <button
               type="button"
               onClick={() => setStorageModalOpen(true)}
-              className="inline-flex items-center gap-1.5 text-xs text-[var(--ds-fg-secondary)] hover:text-[var(--ds-fg)] cursor-pointer"
+              className="inline-flex items-center gap-1.5 text-left text-xs text-[var(--ds-fg-secondary)] hover:text-[var(--ds-fg)] cursor-pointer"
             >
               {cloudConnected ? (
                 <>
-                  <Cloud className="h-3.5 w-3.5 text-emerald-500" />
-                  <span>
+                  <Cloud className="h-3.5 w-3.5 shrink-0 text-emerald-500" />
+                  <span className="truncate">
                     {storageView.auto_upload
                       ? `Auto-uploading to ${storageView.remote_label}`
-                      : `Connected (${storageView.remote_label}) — manual upload`}
+                      : `Connected (${storageView.remote_label}) — manual`}
                   </span>
                 </>
               ) : (
                 <>
-                  <CloudOff className="h-3.5 w-3.5" />
+                  <CloudOff className="h-3.5 w-3.5 shrink-0" />
                   <span>Saving locally · Connect R2 / S3 / Google Drive</span>
                 </>
               )}
@@ -533,15 +563,15 @@ export const App: React.FC = () => {
 
         {/* Library Toolbar */}
         <section className="space-y-3">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="relative flex-1 max-w-md">
-              <Search className="pointer-events-none absolute top-1/2 left-3 h-3.5 w-3.5 -translate-y-1/2 text-[var(--ds-fg-muted)]" />
+          <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
+            <div className="relative flex-1 sm:max-w-md">
+              <Search className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 sm:h-3.5 sm:w-3.5 -translate-y-1/2 text-[var(--ds-fg-muted)]" />
               <input
                 type="search"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search recordings by title, service, notes, or #tag…"
-                className="h-9 w-full rounded-md border border-[var(--ds-border)] bg-[var(--ds-card)] pl-9 pr-3 text-xs text-[var(--ds-fg)] placeholder:text-[var(--ds-fg-muted)] focus:border-[var(--ds-fg)] focus:outline-none"
+                placeholder="Search title, service, notes, or #tag…"
+                className="h-11 sm:h-9 w-full rounded-md border border-[var(--ds-border)] bg-[var(--ds-card)] pl-9 pr-3 text-xs text-[var(--ds-fg)] placeholder:text-[var(--ds-fg-muted)] focus:border-[var(--ds-fg)] focus:outline-none"
               />
             </div>
 
@@ -550,7 +580,7 @@ export const App: React.FC = () => {
                 type="button"
                 onClick={toggleSelectAll}
                 disabled={selectableFiltered.length === 0}
-                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[var(--ds-border)] bg-[var(--ds-card)] px-2.5 text-xs text-[var(--ds-fg-secondary)] hover:border-[var(--ds-border-strong)] hover:text-[var(--ds-fg)] disabled:opacity-40 cursor-pointer"
+                className="inline-flex h-9 sm:h-8 items-center gap-1.5 rounded-md border border-[var(--ds-border)] bg-[var(--ds-card)] px-3 sm:px-2.5 text-xs text-[var(--ds-fg-secondary)] hover:border-[var(--ds-border-strong)] hover:text-[var(--ds-fg)] disabled:opacity-40 cursor-pointer"
               >
                 <CheckSquare className="h-3.5 w-3.5" />
                 <span>{allFilteredSelected ? "Deselect All" : "Select All"}</span>
@@ -561,7 +591,7 @@ export const App: React.FC = () => {
                   type="button"
                   disabled={bulkUploading}
                   onClick={handleUploadAllPending}
-                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 text-xs font-medium text-emerald-500 hover:bg-emerald-500/15 disabled:opacity-50 cursor-pointer"
+                  className="inline-flex h-9 sm:h-8 items-center gap-1.5 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 text-xs font-medium text-emerald-500 hover:bg-emerald-500/15 disabled:opacity-50 cursor-pointer"
                 >
                   {bulkUploading ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -574,8 +604,8 @@ export const App: React.FC = () => {
             </div>
           </div>
 
-          {/* Service filter pills */}
-          <div className="flex flex-wrap items-center gap-1.5">
+          {/* Service filter pills (horizontal swipeable strip on mobile) */}
+          <div className="no-scrollbar -mx-3 flex items-center gap-1.5 overflow-x-auto px-3 pb-0.5 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0">
             {serviceOptions.map((svc) => {
               const active = serviceFilter === svc;
               return (
@@ -583,7 +613,7 @@ export const App: React.FC = () => {
                   key={svc}
                   type="button"
                   onClick={() => setServiceFilter(svc)}
-                  className={`rounded-full border px-3 py-1 text-xs font-medium transition cursor-pointer ${
+                  className={`shrink-0 rounded-full border px-3.5 py-1.5 sm:px-3 sm:py-1 text-xs font-medium transition cursor-pointer ${
                     active
                       ? "border-[var(--ds-fg)] bg-[var(--ds-btn-primary-bg)] text-[var(--ds-btn-primary-fg)]"
                       : "border-[var(--ds-border)] bg-[var(--ds-card)] text-[var(--ds-fg-secondary)] hover:border-[var(--ds-border-strong)] hover:text-[var(--ds-fg)]"
@@ -596,40 +626,40 @@ export const App: React.FC = () => {
           </div>
         </section>
 
-        {/* Sticky Bulk Selection Bar */}
+        {/* Bulk Selection Bar: bottom thumb dock on mobile, sticky top bar on desktop */}
         {selectedCalls.length > 0 && (
-          <div className="sticky top-16 z-20 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[var(--ds-fg)]/40 bg-[var(--ds-card)]/95 px-4 py-2.5 shadow-lg backdrop-blur-md">
+          <div className="fixed inset-x-3 bottom-[max(12px,env(safe-area-inset-bottom))] z-30 flex flex-wrap items-center justify-between gap-2.5 rounded-2xl border border-[var(--ds-fg)]/40 bg-[var(--ds-card)]/95 px-3.5 py-3 shadow-2xl backdrop-blur-md sm:sticky sm:top-16 sm:inset-x-auto sm:z-20 sm:rounded-xl sm:px-4 sm:py-2.5 sm:shadow-lg">
             <span className="text-xs font-medium text-[var(--ds-fg)]">
-              {selectedCalls.length} recording{selectedCalls.length === 1 ? "" : "s"} selected
+              {selectedCalls.length} selected
             </span>
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
               <button
                 type="button"
                 disabled={bulkUploading}
                 onClick={() => handleBulkUpload()}
-                className="inline-flex h-8 items-center gap-1.5 rounded-md bg-[var(--ds-btn-primary-bg)] px-3 text-xs font-medium text-[var(--ds-btn-primary-fg)] hover:bg-[var(--ds-btn-primary-hover)] disabled:opacity-50 cursor-pointer"
+                className="inline-flex h-9 sm:h-8 items-center gap-1.5 rounded-md bg-[var(--ds-btn-primary-bg)] px-3 text-xs font-medium text-[var(--ds-btn-primary-fg)] hover:bg-[var(--ds-btn-primary-hover)] disabled:opacity-50 cursor-pointer"
               >
                 {bulkUploading ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 ) : (
                   <Upload className="h-3.5 w-3.5" />
                 )}
-                <span>Upload Selected</span>
+                <span>Upload</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => setDeleteTargets(selectedCalls)}
-                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-red-500/40 bg-red-500/10 px-3 text-xs font-medium text-red-400 hover:bg-red-500/20 cursor-pointer"
+                className="inline-flex h-9 sm:h-8 items-center gap-1.5 rounded-md border border-red-500/40 bg-red-500/10 px-3 text-xs font-medium text-red-400 hover:bg-red-500/20 cursor-pointer"
               >
                 <Trash2 className="h-3.5 w-3.5" />
-                <span>Delete Selected</span>
+                <span>Delete</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => setSelectedIds(new Set())}
-                className="inline-flex h-8 items-center rounded-md border border-[var(--ds-border)] px-2.5 text-xs text-[var(--ds-fg-secondary)] hover:text-[var(--ds-fg)] cursor-pointer"
+                className="inline-flex h-9 sm:h-8 items-center rounded-md border border-[var(--ds-border)] px-2.5 text-xs text-[var(--ds-fg-secondary)] hover:text-[var(--ds-fg)] cursor-pointer"
               >
                 Clear
               </button>
@@ -638,7 +668,13 @@ export const App: React.FC = () => {
         )}
 
         {/* Calls List */}
-        <section className="space-y-3 pb-12">
+        <section
+          className={`space-y-3 ${
+            selectedCalls.length > 0
+              ? "pb-24 sm:pb-12"
+              : "pb-[max(3rem,env(safe-area-inset-bottom))]"
+          }`}
+        >
           {loading ? (
             <div className="flex items-center justify-center rounded-xl border border-[var(--ds-border)] bg-[var(--ds-card)] py-16 text-xs text-[var(--ds-fg-muted)]">
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -698,7 +734,11 @@ export const App: React.FC = () => {
       {/* Toast */}
       {toast && (
         <div
-          className={`fixed right-4 bottom-4 z-50 rounded-lg border px-4 py-2.5 text-xs font-medium shadow-xl ${
+          className={`fixed inset-x-4 z-50 rounded-lg border px-4 py-2.5 text-center text-xs font-medium shadow-xl sm:inset-x-auto sm:right-4 sm:bottom-4 sm:text-left ${
+            selectedCalls.length > 0
+              ? "bottom-[calc(max(12px,env(safe-area-inset-bottom))+64px)] sm:bottom-4"
+              : "bottom-[max(16px,env(safe-area-inset-bottom))]"
+          } ${
             toast.tone === "err"
               ? "border-red-500/40 bg-red-950/90 text-red-200"
               : "border-[var(--ds-border-strong)] bg-[var(--ds-card)] text-[var(--ds-fg)]"

@@ -193,10 +193,10 @@ export const CallCard: React.FC<CallCardProps> = ({
         selected
           ? "border-[var(--ds-fg)] bg-[var(--ds-card)]"
           : "border-[var(--ds-border)] bg-[var(--ds-card)] hover:border-[var(--ds-border-strong)]"
-      } p-4`}
+      } p-3.5 sm:p-4`}
     >
       {/* Top Row */}
-      <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
+      <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex min-w-0 flex-1 items-start gap-3">
           <input
             type="checkbox"
@@ -204,7 +204,7 @@ export const CallCard: React.FC<CallCardProps> = ({
             disabled={call.status === "recording"}
             onChange={() => onToggleSelect(call.call_id)}
             aria-label={`Select ${displayTitle}`}
-            className="mt-1 h-4 w-4 shrink-0 rounded accent-[var(--ds-fg)] cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
+            className="mt-0.5 sm:mt-1 h-5 w-5 sm:h-4 sm:w-4 shrink-0 rounded accent-[var(--ds-fg)] cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
           />
 
           <div className="min-w-0 flex-1">
@@ -225,19 +225,19 @@ export const CallCard: React.FC<CallCardProps> = ({
                       setEditingTitle(false);
                     }
                   }}
-                  className="h-7 w-full max-w-sm rounded-md border border-[var(--ds-border-strong)] bg-[var(--ds-surface)] px-2.5 text-sm font-medium text-[var(--ds-fg)] focus:border-[var(--ds-fg)] focus:outline-none"
+                  className="h-9 sm:h-7 min-w-0 flex-1 max-w-sm rounded-md border border-[var(--ds-border-strong)] bg-[var(--ds-surface)] px-2.5 text-sm font-medium text-[var(--ds-fg)] focus:border-[var(--ds-fg)] focus:outline-none"
                 />
                 <button
                   type="button"
                   disabled={savingTitle}
                   onClick={saveTitle}
-                  className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-[var(--ds-btn-primary-bg)] text-[var(--ds-btn-primary-fg)] hover:bg-[var(--ds-btn-primary-hover)] cursor-pointer"
+                  className="inline-flex h-9 w-9 sm:h-7 sm:w-7 shrink-0 items-center justify-center rounded-md bg-[var(--ds-btn-primary-bg)] text-[var(--ds-btn-primary-fg)] hover:bg-[var(--ds-btn-primary-hover)] cursor-pointer"
                   title="Save title"
                 >
                   {savingTitle ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    <Loader2 className="h-4 w-4 sm:h-3.5 sm:w-3.5 animate-spin" />
                   ) : (
-                    <Check className="h-3.5 w-3.5" />
+                    <Check className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
                   )}
                 </button>
                 <button
@@ -246,17 +246,17 @@ export const CallCard: React.FC<CallCardProps> = ({
                     setTitleDraft(call.title);
                     setEditingTitle(false);
                   }}
-                  className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-[var(--ds-border)] text-[var(--ds-fg-muted)] hover:text-[var(--ds-fg)] cursor-pointer"
+                  className="inline-flex h-9 w-9 sm:h-7 sm:w-7 shrink-0 items-center justify-center rounded-md border border-[var(--ds-border)] text-[var(--ds-fg-muted)] hover:text-[var(--ds-fg)] cursor-pointer"
                   title="Cancel"
                 >
-                  <X className="h-3.5 w-3.5" />
+                  <X className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
                 </button>
               </div>
             ) : (
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5">
                 <h3
                   onClick={() => setEditingTitle(true)}
-                  className="truncate text-sm font-semibold text-[var(--ds-fg)] cursor-pointer hover:underline decoration-[var(--ds-border-strong)] underline-offset-4"
+                  className="min-w-0 truncate text-sm font-semibold text-[var(--ds-fg)] cursor-pointer hover:underline decoration-[var(--ds-border-strong)] underline-offset-4"
                   title="Click to rename"
                 >
                   {displayTitle}
@@ -264,10 +264,10 @@ export const CallCard: React.FC<CallCardProps> = ({
                 <button
                   type="button"
                   onClick={() => setEditingTitle(true)}
-                  className="rounded p-1 text-[var(--ds-fg-muted)] hover:bg-[var(--ds-muted)] hover:text-[var(--ds-fg)] cursor-pointer"
+                  className="inline-flex h-7 w-7 sm:h-6 sm:w-6 shrink-0 items-center justify-center rounded text-[var(--ds-fg-muted)] hover:bg-[var(--ds-muted)] hover:text-[var(--ds-fg)] cursor-pointer"
                   title="Rename recording"
                 >
-                  <Pencil className="h-3 w-3" />
+                  <Pencil className="h-3.5 w-3.5 sm:h-3 sm:w-3" />
                 </button>
               </div>
             )}
@@ -281,11 +281,11 @@ export const CallCard: React.FC<CallCardProps> = ({
                   href={call.page_url}
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex items-center gap-1 font-mono text-[11px] text-[var(--ds-fg-secondary)] hover:text-[var(--ds-fg)] hover:underline"
+                  className="inline-flex max-w-full items-center gap-1 font-mono text-[11px] text-[var(--ds-fg-secondary)] hover:text-[var(--ds-fg)] hover:underline"
                   title={call.page_url}
                 >
-                  <span className="max-w-[180px] truncate">{pageHost}</span>
-                  <ExternalLink className="h-2.5 w-2.5" />
+                  <span className="max-w-[160px] sm:max-w-[180px] truncate">{pageHost}</span>
+                  <ExternalLink className="h-2.5 w-2.5 shrink-0" />
                 </a>
               )}
               <span>{formatStartedAt(call.started_at)}</span>
@@ -303,56 +303,60 @@ export const CallCard: React.FC<CallCardProps> = ({
         </div>
 
         {/* Status & Row Actions */}
-        <div className="flex flex-wrap items-center gap-2">
-          {call.status === "recording" && (
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-red-500/40 bg-red-500/10 px-2.5 py-0.5 text-[11px] font-medium text-red-500">
-              <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
-              Recording
-            </span>
-          )}
-          {renderUploadBadge()}
+        <div className="flex flex-wrap items-center justify-between gap-2 sm:justify-end">
+          <div className="flex items-center gap-2">
+            {call.status === "recording" && (
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-red-500/40 bg-red-500/10 px-2.5 py-0.5 text-[11px] font-medium text-red-500">
+                <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
+                Recording
+              </span>
+            )}
+            {renderUploadBadge()}
+          </div>
 
-          {canUpload && (
+          <div className="flex items-center gap-1.5">
+            {canUpload && (
+              <button
+                type="button"
+                disabled={uploading}
+                onClick={handleUpload}
+                className="inline-flex h-8 sm:h-7 items-center gap-1 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2.5 text-xs sm:text-[11px] font-medium text-[var(--ds-fg)] hover:border-[var(--ds-border-strong)] disabled:opacity-50 cursor-pointer"
+                title="Upload this recording to connected cloud storage"
+              >
+                {uploading ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <Upload className="h-3 w-3" />
+                )}
+                <span>{call.upload_status === "failed" ? "Retry" : "Upload"}</span>
+              </button>
+            )}
+
             <button
               type="button"
-              disabled={uploading}
-              onClick={handleUpload}
-              className="inline-flex h-7 items-center gap-1 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2.5 text-[11px] font-medium text-[var(--ds-fg)] hover:border-[var(--ds-border-strong)] disabled:opacity-50 cursor-pointer"
-              title="Upload this recording to connected cloud storage"
+              onClick={() => setDetailsOpen((v) => !v)}
+              className="inline-flex h-8 sm:h-7 items-center gap-1 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2.5 sm:px-2 text-xs sm:text-[11px] text-[var(--ds-fg-secondary)] hover:border-[var(--ds-border-strong)] hover:text-[var(--ds-fg)] cursor-pointer"
+              title="Edit notes and tags"
             >
-              {uploading ? (
-                <Loader2 className="h-3 w-3 animate-spin" />
-              ) : (
-                <Upload className="h-3 w-3" />
-              )}
-              <span>{call.upload_status === "failed" ? "Retry" : "Upload"}</span>
+              <span>Notes</span>
+              {detailsOpen ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
             </button>
-          )}
 
-          <button
-            type="button"
-            onClick={() => setDetailsOpen((v) => !v)}
-            className="inline-flex h-7 items-center gap-1 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 text-[11px] text-[var(--ds-fg-secondary)] hover:border-[var(--ds-border-strong)] hover:text-[var(--ds-fg)] cursor-pointer"
-            title="Edit notes and tags"
-          >
-            <span>Notes</span>
-            {detailsOpen ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-          </button>
-
-          <button
-            type="button"
-            disabled={call.status === "recording"}
-            onClick={() => onRequestDelete(call)}
-            className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[var(--ds-fg-muted)] hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer"
-            title="Delete recording"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </button>
+            <button
+              type="button"
+              disabled={call.status === "recording"}
+              onClick={() => onRequestDelete(call)}
+              className="inline-flex h-8 w-8 sm:h-7 sm:w-7 items-center justify-center rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[var(--ds-fg-muted)] hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer"
+              title="Delete recording"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          </div>
         </div>
       </div>
 
       {call.upload_status === "failed" && call.upload_error && (
-        <div className="mb-3 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-1.5 font-mono text-[11px] text-red-400">
+        <div className="mb-3 break-words rounded-md border border-red-500/30 bg-red-500/10 px-3 py-1.5 font-mono text-[11px] text-red-400">
           {call.upload_error}
         </div>
       )}
@@ -376,14 +380,14 @@ export const CallCard: React.FC<CallCardProps> = ({
                 value={tagsDraft}
                 onChange={(e) => setTagsDraft(e.target.value)}
                 placeholder="english, interview, daily"
-                className="w-full rounded-md border border-[var(--ds-border)] bg-[var(--ds-card)] px-2.5 py-1.5 text-xs text-[var(--ds-fg)] focus:border-[var(--ds-fg)] focus:outline-none"
+                className="h-10 sm:h-auto w-full rounded-md border border-[var(--ds-border)] bg-[var(--ds-card)] px-2.5 py-1.5 text-xs text-[var(--ds-fg)] focus:border-[var(--ds-fg)] focus:outline-none"
               />
             </div>
-            <div>
+            <div className="min-w-0">
               <label className="mb-1 block text-[11px] font-medium text-[var(--ds-fg-secondary)]">
                 Remote Location
               </label>
-              <div className="truncate rounded-md border border-[var(--ds-border)] bg-[var(--ds-card)] px-2.5 py-1.5 font-mono text-[11px] text-[var(--ds-fg-muted)]">
+              <div className="truncate rounded-md border border-[var(--ds-border)] bg-[var(--ds-card)] px-2.5 py-2 sm:py-1.5 font-mono text-[11px] text-[var(--ds-fg-muted)]">
                 {call.remote_uri ?? "Not uploaded"}
               </div>
             </div>
@@ -398,18 +402,18 @@ export const CallCard: React.FC<CallCardProps> = ({
               value={notesDraft}
               onChange={(e) => setNotesDraft(e.target.value)}
               placeholder="Add observations, topics discussed, follow-ups…"
-              className="w-full rounded-md border border-[var(--ds-border)] bg-[var(--ds-card)] px-2.5 py-1.5 text-xs text-[var(--ds-fg)] focus:border-[var(--ds-fg)] focus:outline-none"
+              className="w-full rounded-md border border-[var(--ds-border)] bg-[var(--ds-card)] px-2.5 py-2 sm:py-1.5 text-xs text-[var(--ds-fg)] focus:border-[var(--ds-fg)] focus:outline-none"
             />
           </div>
 
           <div className="flex items-center justify-between gap-2">
-            <span className="font-mono text-[11px] text-[var(--ds-fg-muted)]">
+            <span className="truncate font-mono text-[11px] text-[var(--ds-fg-muted)]">
               ID: {call.call_id}
             </span>
             <button
               type="submit"
               disabled={savingDetails}
-              className="inline-flex h-7 items-center gap-1.5 rounded-md bg-[var(--ds-btn-primary-bg)] px-3 text-xs font-medium text-[var(--ds-btn-primary-fg)] hover:bg-[var(--ds-btn-primary-hover)] disabled:opacity-50 cursor-pointer"
+              className="inline-flex h-9 sm:h-7 shrink-0 items-center gap-1.5 rounded-md bg-[var(--ds-btn-primary-bg)] px-3.5 sm:px-3 text-xs font-medium text-[var(--ds-btn-primary-fg)] hover:bg-[var(--ds-btn-primary-hover)] disabled:opacity-50 cursor-pointer"
             >
               {savingDetails && <Loader2 className="h-3 w-3 animate-spin" />}
               <span>Save Details</span>

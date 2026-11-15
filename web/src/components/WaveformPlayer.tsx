@@ -275,13 +275,13 @@ export const WaveformPlayer: React.FC<WaveformPlayerProps> = ({ call }) => {
             <span>Extracting waveform…</span>
           </div>
         ) : waveformError ? (
-          <div className="flex h-12 items-center justify-center text-xs text-[var(--ds-fg-muted)]">
+          <div className="flex h-12 items-center justify-center px-2 text-center text-xs text-[var(--ds-fg-muted)]">
             Waveform unavailable ({waveformError}) — audio controls below still work
           </div>
         ) : hasDual ? (
           <div className="flex items-stretch gap-2">
             {/* Labels column */}
-            <div className="flex w-9 shrink-0 flex-col justify-between py-1">
+            <div className="flex w-8 sm:w-9 shrink-0 flex-col justify-between py-1">
               <span className="font-mono text-[10px] font-medium uppercase tracking-wider text-emerald-500">
                 You
               </span>
@@ -290,7 +290,7 @@ export const WaveformPlayer: React.FC<WaveformPlayerProps> = ({ call }) => {
               </span>
             </div>
 
-            {/* Scrubbable bars + playhead */}
+            {/* Scrubbable SVG bars + playhead */}
             <div
               ref={trackRef}
               role="slider"
@@ -315,47 +315,67 @@ export const WaveformPlayer: React.FC<WaveformPlayerProps> = ({ call }) => {
                 setIsScrubbing(true);
                 seekFromClientX(e.clientX);
               }}
-              className="relative flex flex-1 cursor-pointer flex-col gap-1.5 touch-none"
+              className="relative flex flex-1 cursor-pointer flex-col gap-1.5 py-0.5 touch-none"
             >
-              <div className="flex h-7 items-end gap-[2px]">
+              <svg
+                viewBox={`0 0 ${youPeaks.length * 4} 28`}
+                preserveAspectRatio="none"
+                className="block h-7 w-full overflow-visible"
+                aria-hidden
+              >
                 {youPeaks.map((amp, i) => {
                   const pct = (i + 0.5) / youPeaks.length;
                   const active = pct <= progress;
-                  const h = Math.max(12, Math.round(amp * 100));
+                  const h = Math.max(3.5, Math.round(amp * 280) / 10);
                   return (
-                    <div
+                    <rect
                       key={i}
-                      style={{ height: `${h}%` }}
-                      className={`flex-1 rounded-[1px] transition-colors ${
+                      x={i * 4 + 0.6}
+                      y={28 - h}
+                      width={2.8}
+                      height={h}
+                      rx={0.8}
+                      fill={active ? "var(--ds-you)" : "currentColor"}
+                      className={
                         active
-                          ? "bg-emerald-500"
-                          : "bg-zinc-300 dark:bg-zinc-700/80 group-hover:bg-zinc-400 dark:group-hover:bg-zinc-600"
-                      }`}
+                          ? ""
+                          : "text-zinc-300 dark:text-zinc-700/80 group-hover:text-zinc-400 dark:group-hover:text-zinc-600"
+                      }
                     />
                   );
                 })}
-              </div>
+              </svg>
 
               <div className="h-px w-full bg-[var(--ds-border)]" />
 
-              <div className="flex h-7 items-start gap-[2px]">
+              <svg
+                viewBox={`0 0 ${agentPeaks.length * 4} 28`}
+                preserveAspectRatio="none"
+                className="block h-7 w-full overflow-visible"
+                aria-hidden
+              >
                 {agentPeaks.map((amp, i) => {
                   const pct = (i + 0.5) / agentPeaks.length;
                   const active = pct <= progress;
-                  const h = Math.max(12, Math.round(amp * 100));
+                  const h = Math.max(3.5, Math.round(amp * 280) / 10);
                   return (
-                    <div
+                    <rect
                       key={i}
-                      style={{ height: `${h}%` }}
-                      className={`flex-1 rounded-[1px] transition-colors ${
+                      x={i * 4 + 0.6}
+                      y={0}
+                      width={2.8}
+                      height={h}
+                      rx={0.8}
+                      fill={active ? "var(--ds-agent)" : "currentColor"}
+                      className={
                         active
-                          ? "bg-indigo-500 dark:bg-indigo-400"
-                          : "bg-zinc-300 dark:bg-zinc-700/80 group-hover:bg-zinc-400 dark:group-hover:bg-zinc-600"
-                      }`}
+                          ? ""
+                          : "text-zinc-300 dark:text-zinc-700/80 group-hover:text-zinc-400 dark:group-hover:text-zinc-600"
+                      }
                     />
                   );
                 })}
-              </div>
+              </svg>
 
               {totalDuration > 0 && (
                 <div
@@ -379,24 +399,36 @@ export const WaveformPlayer: React.FC<WaveformPlayerProps> = ({ call }) => {
               setIsScrubbing(true);
               seekFromClientX(e.clientX);
             }}
-            className="relative flex h-12 cursor-pointer items-center gap-[2px] touch-none"
+            className="relative flex h-12 cursor-pointer items-center touch-none"
           >
-            {(fallbackPeaks.length > 0 ? fallbackPeaks : Array.from({ length: bins }, () => 0.15)).map(
-              (amp, i) => {
-                const pct = (i + 0.5) / bins;
-                const active = pct <= progress;
-                const h = Math.max(12, Math.round(amp * 100));
-                return (
-                  <div
-                    key={i}
-                    style={{ height: `${h}%` }}
-                    className={`flex-1 rounded-[1px] ${
-                      active ? "bg-[var(--ds-fg)]" : "bg-zinc-300 dark:bg-zinc-700"
-                    }`}
-                  />
-                );
-              }
-            )}
+            <svg
+              viewBox={`0 0 ${bins * 4} 36`}
+              preserveAspectRatio="none"
+              className="block h-10 w-full overflow-visible"
+              aria-hidden
+            >
+              {(fallbackPeaks.length > 0 ? fallbackPeaks : Array.from({ length: bins }, () => 0.15)).map(
+                (amp, i) => {
+                  const pct = (i + 0.5) / bins;
+                  const active = pct <= progress;
+                  const h = Math.max(4, Math.round(amp * 360) / 10);
+                  return (
+                    <rect
+                      key={i}
+                      x={i * 4 + 0.6}
+                      y={(36 - h) / 2}
+                      width={2.8}
+                      height={h}
+                      rx={0.8}
+                      fill="currentColor"
+                      className={
+                        active ? "text-[var(--ds-fg)]" : "text-zinc-300 dark:text-zinc-700"
+                      }
+                    />
+                  );
+                }
+              )}
+            </svg>
             {totalDuration > 0 && (
               <div
                 aria-hidden
@@ -409,21 +441,21 @@ export const WaveformPlayer: React.FC<WaveformPlayerProps> = ({ call }) => {
       </div>
 
       {/* Transport & Track Controls */}
-      <div className="flex flex-wrap items-center justify-between gap-2.5">
+      <div className="flex flex-col gap-2.5 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
         <div className="flex items-center gap-1.5">
           <button
             type="button"
             onClick={togglePlay}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-md bg-[var(--ds-btn-primary-bg)] text-[var(--ds-btn-primary-fg)] transition hover:bg-[var(--ds-btn-primary-hover)] cursor-pointer"
+            className="inline-flex h-10 w-10 sm:h-8 sm:w-8 shrink-0 items-center justify-center rounded-lg sm:rounded-md bg-[var(--ds-btn-primary-bg)] text-[var(--ds-btn-primary-fg)] transition hover:bg-[var(--ds-btn-primary-hover)] cursor-pointer"
             title={playing ? "Pause" : "Play"}
           >
-            {playing ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5 ml-0.5" />}
+            {playing ? <Pause className="h-4 w-4 sm:h-3.5 sm:w-3.5" /> : <Play className="h-4 w-4 sm:h-3.5 sm:w-3.5 ml-0.5" />}
           </button>
 
           <button
             type="button"
             onClick={() => skip(-10)}
-            className="inline-flex h-8 items-center gap-1 rounded-md border border-[var(--ds-border)] bg-[var(--ds-card)] px-2 text-[11px] font-medium text-[var(--ds-fg-secondary)] hover:border-[var(--ds-border-strong)] hover:text-[var(--ds-fg)] cursor-pointer"
+            className="inline-flex h-9 sm:h-8 items-center gap-1 rounded-md border border-[var(--ds-border)] bg-[var(--ds-card)] px-2.5 sm:px-2 text-xs sm:text-[11px] font-medium text-[var(--ds-fg-secondary)] hover:border-[var(--ds-border-strong)] hover:text-[var(--ds-fg)] cursor-pointer"
             title="Back 10 seconds"
           >
             <RotateCcw className="h-3 w-3" />
@@ -433,7 +465,7 @@ export const WaveformPlayer: React.FC<WaveformPlayerProps> = ({ call }) => {
           <button
             type="button"
             onClick={() => skip(10)}
-            className="inline-flex h-8 items-center gap-1 rounded-md border border-[var(--ds-border)] bg-[var(--ds-card)] px-2 text-[11px] font-medium text-[var(--ds-fg-secondary)] hover:border-[var(--ds-border-strong)] hover:text-[var(--ds-fg)] cursor-pointer"
+            className="inline-flex h-9 sm:h-8 items-center gap-1 rounded-md border border-[var(--ds-border)] bg-[var(--ds-card)] px-2.5 sm:px-2 text-xs sm:text-[11px] font-medium text-[var(--ds-fg-secondary)] hover:border-[var(--ds-border-strong)] hover:text-[var(--ds-fg)] cursor-pointer"
             title="Forward 10 seconds"
           >
             <span>10s</span>
@@ -443,21 +475,21 @@ export const WaveformPlayer: React.FC<WaveformPlayerProps> = ({ call }) => {
           <button
             type="button"
             onClick={cycleSpeed}
-            className="inline-flex h-8 min-w-[44px] items-center justify-center rounded-md border border-[var(--ds-border)] bg-[var(--ds-card)] px-2 font-mono text-[11px] font-medium text-[var(--ds-fg-secondary)] hover:border-[var(--ds-border-strong)] hover:text-[var(--ds-fg)] cursor-pointer"
+            className="inline-flex h-9 sm:h-8 min-w-[44px] items-center justify-center rounded-md border border-[var(--ds-border)] bg-[var(--ds-card)] px-2 font-mono text-xs sm:text-[11px] font-medium text-[var(--ds-fg-secondary)] hover:border-[var(--ds-border-strong)] hover:text-[var(--ds-fg)] cursor-pointer"
             title="Playback speed"
           >
             {speed}x
           </button>
 
-          <span className="ml-1 font-mono text-xs tabular-nums text-[var(--ds-fg-secondary)]">
+          <span className="ml-auto sm:ml-1 font-mono text-xs tabular-nums text-[var(--ds-fg-secondary)]">
             {formatTime(currentTime)}{" "}
             <span className="text-[var(--ds-fg-muted)]">/ {formatTime(totalDuration)}</span>
           </span>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center justify-between gap-2 sm:justify-end">
           {/* Segmented track switcher */}
-          <div className="inline-flex rounded-md border border-[var(--ds-border)] bg-[var(--ds-card)] p-0.5">
+          <div className="inline-flex flex-1 sm:flex-initial rounded-md border border-[var(--ds-border)] bg-[var(--ds-card)] p-0.5">
             {availableTracks.map((t) => {
               const active = t.key === track;
               return (
@@ -465,7 +497,7 @@ export const WaveformPlayer: React.FC<WaveformPlayerProps> = ({ call }) => {
                   key={t.key}
                   type="button"
                   onClick={() => switchTrack(t.key)}
-                  className={`rounded px-2.5 py-1 text-[11px] font-medium transition cursor-pointer ${
+                  className={`flex-1 sm:flex-initial rounded px-2.5 py-1.5 sm:py-1 text-xs sm:text-[11px] font-medium transition cursor-pointer ${
                     active
                       ? "bg-[var(--ds-muted)] text-[var(--ds-fg)] shadow-xs"
                       : "text-[var(--ds-fg-muted)] hover:text-[var(--ds-fg)]"
@@ -480,10 +512,10 @@ export const WaveformPlayer: React.FC<WaveformPlayerProps> = ({ call }) => {
           {/* Direct Download */}
           <a
             href={`/api/calls/${encodeURIComponent(call.call_id)}/audio/${track}?download=1`}
-            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-[var(--ds-border)] bg-[var(--ds-card)] px-2.5 text-[11px] font-medium text-[var(--ds-fg-secondary)] hover:border-[var(--ds-border-strong)] hover:text-[var(--ds-fg)] no-underline"
+            className="inline-flex h-9 sm:h-8 shrink-0 items-center gap-1.5 rounded-md border border-[var(--ds-border)] bg-[var(--ds-card)] px-3 sm:px-2.5 text-xs sm:text-[11px] font-medium text-[var(--ds-fg-secondary)] hover:border-[var(--ds-border-strong)] hover:text-[var(--ds-fg)] no-underline"
             title={`Download ${track} audio`}
           >
-            <Download className="h-3 w-3" />
+            <Download className="h-3.5 w-3.5 sm:h-3 sm:w-3" />
             <span>Download</span>
           </a>
         </div>
