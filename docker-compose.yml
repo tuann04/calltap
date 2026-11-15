@@ -131,9 +131,9 @@ services:
       - --server.http.listen-addr=0.0.0.0:12345
       - --storage.path=/var/lib/alloy/data
       - /etc/alloy/config.alloy
-    mem_limit: 160m
+    mem_limit: 256m
     environment:
-      GOMEMLIMIT: "120MiB"
+      GOMEMLIMIT: "190MiB"
     depends_on:
       - loki
       - tempo
@@ -149,7 +149,7 @@ services:
   grafana:
     image: grafana/grafana:11.5.2
     restart: unless-stopped
-    mem_limit: 256m
+    mem_limit: 320m
     ports:
       - "127.0.0.1:3000:3000"
     depends_on:
@@ -157,7 +157,7 @@ services:
       - tempo
       - mimir
     environment:
-      GOMEMLIMIT: "200MiB"
+      GOMEMLIMIT: "240MiB"
       GF_SECURITY_ADMIN_USER: "${GRAFANA_ADMIN_USER:-admin}"
       GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:-calltap-grafana}"
       GF_USERS_ALLOW_SIGN_UP: "false"
