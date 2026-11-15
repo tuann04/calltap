@@ -9,6 +9,7 @@ import httpx
 from calltap.config import Settings
 from calltap.db import CallDB
 from calltap.models import CallMetadata, UploadStatus
+from calltap.storage import RcloneTarget, StorageManager
 
 
 def build_remote_uri(remote: str, prefix: str, local_rel_dir: str) -> str:
@@ -36,23 +37,39 @@ def write_meta_file(call_dir: Path, meta: CallMetadata) -> None:
 class CloudUploader:
     """Uploads completed call directories to cloud storage via rclone with retries + verification."""
 
-    def __init__(self, settings: Settings, db: CallDB) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        db: CallDB,
+        storage: StorageManager | None = None,
+    ) -> None:
         self.settings = settings
         self.db = db
+        self.storage = storage or StorageManager(settings)
+
+    def _target(self) -> RcloneTarget | None:
+        return self.storage.resolve_target()
 
     @property
     def enabled(self) -> bool:
-        return bool(self.settings.rclone_remote.strip())
+        return self._target() is not None
 
-    def _rclone_args(self, *subcmd: str) -> list[str]:
+    @property
+    def auto_upload_enabled(self) -> bool:
+        t = self._target()
+        return t is not None and t.auto_upload
+
+    def _rclone_args(self, target: RcloneTarget | None, *subcmd: str) -> list[str]:
         args = ["rclone"]
-        if self.settings.rclone_config.exists():
-            args.extend(["--config", str(self.settings.rclone_config)])
+        cfg_path = target.config_path if target else None
+        if cfg_path is not None and cfg_path.exists():
+            args.extend(["--config", str(cfg_path)])
         args.extend(subcmd)
         return args
 
-    async def _run_rclone(self, *subcmd: str) -> tuple[int, str]:
-        cmd = self._rclone_args(*subcmd)
+    async def _run_rclone(self, *subcmd: str, target: RcloneTarget | None = None) -> tuple[int, str]:
+        resolved = target or self._target()
+        cmd = self._rclone_args(resolved, *subcmd)
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
@@ -61,12 +78,20 @@ class CloudUploader:
         stdout, _ = await proc.communicate()
         return proc.returncode or 0, stdout.decode(errors="replace")[-1500:]
 
+    async def delete_remote_dir(self, remote_uri: str) -> tuple[bool, str]:
+        target = self._target()
+        if target is None or not remote_uri:
+            return False, "Cloud storage not connected"
+        rc, out = await self._run_rclone("purge", remote_uri, target=target)
+        return rc == 0, out.strip()
+
     async def _notify(self, meta: CallMetadata) -> None:
         url = self.settings.ntfy_url.strip()
         if not url:
             return
         dur = f"{meta.duration_seconds:.0f}s" if meta.duration_seconds is not None else "?"
-        body = f"{meta.service} call ({dur}) uploaded to {meta.remote_uri}"
+        label = meta.title or meta.service
+        body = f"{label} ({dur}) uploaded to {meta.remote_uri}"
         try:
             async with httpx.AsyncClient(timeout=8.0) as client:
                 await client.post(
@@ -80,7 +105,8 @@ class CloudUploader:
             logging.getLogger(__name__).warning("ntfy notification failed: %s", exc)
 
     async def upload_one(self, meta: CallMetadata) -> CallMetadata:
-        if not self.enabled:
+        target = self._target()
+        if target is None:
             updated = self.db.update_upload_state(
                 meta.call_id, UploadStatus.DISABLED, error=None
             )
@@ -97,8 +123,8 @@ class CloudUploader:
             return updated or meta
 
         remote_uri = build_remote_uri(
-            self.settings.rclone_remote,
-            self.settings.rclone_remote_prefix,
+            target.remote,
+            target.prefix,
             meta.local_rel_dir,
         )
 
@@ -116,11 +142,16 @@ class CloudUploader:
             remote_uri,
             "--transfers=4",
             "--retries=3",
+            target=target,
         )
         if rc == 0:
-            # Verify remote files match local sizes/hashes where supported (--size-only works across all backends)
             rc_chk, chk_out = await self._run_rclone(
-                "check", str(call_dir), remote_uri, "--one-way", "--size-only"
+                "check",
+                str(call_dir),
+                remote_uri,
+                "--one-way",
+                "--size-only",
+                target=target,
             )
             if rc_chk != 0:
                 rc = rc_chk
@@ -182,7 +213,6 @@ class CloudUploader:
             if meta is None:
                 break
             if meta.upload_attempts >= self.settings.upload_max_retries:
-                # Wait for manual retry after max automatic attempts.
                 self.db.update_upload_state(
                     meta.call_id,
                     UploadStatus.FAILED,

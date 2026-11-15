@@ -1,0 +1,78 @@
+@import "tailwindcss";
+
+@font-face {
+  font-family: "Geist";
+  src: url("../node_modules/geist/dist/fonts/geist-sans/Geist-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Geist Mono";
+  src: url("../node_modules/geist/dist/fonts/geist-mono/GeistMono-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  --ds-bg: #ffffff;
+  --ds-surface: #fafafa;
+  --ds-card: #ffffff;
+  --ds-muted: #f4f4f5;
+  --ds-border: #e4e4e7;
+  --ds-border-strong: #d4d4d8;
+  --ds-fg: #09090b;
+  --ds-fg-secondary: #52525b;
+  --ds-fg-muted: #71717a;
+  --ds-btn-primary-bg: #09090b;
+  --ds-btn-primary-fg: #ffffff;
+  --ds-btn-primary-hover: #27272a;
+  --ds-accent: #0070f3;
+  --ds-you: #10b981;
+  --ds-agent: #6366f1;
+}
+
+html.dark {
+  --ds-bg: #000000;
+  --ds-surface: #0a0a0a;
+  --ds-card: #0f0f10;
+  --ds-muted: #18181b;
+  --ds-border: #242427;
+  --ds-border-strong: #343438;
+  --ds-fg: #ededed;
+  --ds-fg-secondary: #a1a1aa;
+  --ds-fg-muted: #71717a;
+  --ds-btn-primary-bg: #ededed;
+  --ds-btn-primary-fg: #09090b;
+  --ds-btn-primary-hover: #ffffff;
+  --ds-accent: #3291ff;
+  --ds-you: #10b981;
+  --ds-agent: #818cf8;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background-color: var(--ds-bg);
+  color: var(--ds-fg);
+  font-family: "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+code,
+pre,
+.font-mono {
+  font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+::selection {
+  background: rgba(50, 145, 255, 0.25);
+}

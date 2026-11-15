@@ -191,3 +191,34 @@ class CallDB:
         meta.local_pruned = True
         self.upsert_call(meta)
         return meta
+
+    def delete_call(self, call_id: str) -> CallMetadata | None:
+        meta = self.get_call(call_id)
+        if meta is None:
+            return None
+        self._conn.execute("DELETE FROM calls WHERE call_id = ?", (call_id,))
+        self._conn.commit()
+        return meta
+
+    def delete_calls(self, call_ids: list[str]) -> list[CallMetadata]:
+        deleted: list[CallMetadata] = []
+        for cid in call_ids:
+            meta = self.get_call(cid)
+            if meta is not None:
+                deleted.append(meta)
+        if not deleted:
+            return []
+        placeholders = ",".join("?" for _ in deleted)
+        self._conn.execute(
+            f"DELETE FROM calls WHERE call_id IN ({placeholders})",
+            [m.call_id for m in deleted],
+        )
+        self._conn.commit()
+        return deleted
+
+    def count_pending_uploads(self) -> int:
+        row = self._conn.execute(
+            "SELECT COUNT(*) AS cnt FROM calls WHERE status = ? AND upload_status IN (?, ?)",
+            (CallStatus.COMPLETED.value, UploadStatus.PENDING.value, UploadStatus.UPLOADING.value),
+        ).fetchone()
+        return int(row["cnt"]) if row else 0

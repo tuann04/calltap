@@ -9,7 +9,7 @@ Web voice agents encrypt media end to end with WebRTC (DTLS-SRTP), so a network 
 1. Your phone connects to Neko over HTTPS/WebRTC, sends your mic to virtual sink `audio_input`, and hears `audio_output.monitor`.
 2. Chrome has persistent login enabled (`--bwsi` removed, cookies allowed, profile mounted on a Docker volume) so your Sesame AI session survives restarts.
 3. The CallTap sidecar watches PulseAudio (`pactl list source-outputs`) over a shared unix socket. When Chrome opens `microphone`, one `ffmpeg` process records `audio_input.monitor` (`you.flac`) and `audio_output.monitor` (`agent.flac`) in sync, plus an optional stereo `mix.opus` (left = you, right = agent).
-4. After hang-up, CallTap writes `meta.json`, enqueues the call in a SQLite outbox, uploads to R2 / S3 / GCS / B2 via `rclone` with verification, and prunes local audio after `CALLTAP_LOCAL_RETENTION_DAYS`.
+4. After hang-up, CallTap writes `meta.json`, extracts a dual-track waveform (`peaks.json`), and saves locally by default. Optionally connect Cloudflare R2, AWS S3, Backblaze B2, or Google Drive directly inside the dashboard (no `.env` or `rclone.conf` preconfiguration required) with auto-upload or manual upload of selected calls.
 
 ### Architecture & Audio Routing
 
@@ -197,28 +197,23 @@ flowchart TB
 
 ```bash
 cp .env.example .env
-cp rclone/rclone.conf.example rclone/rclone.conf
-# Edit .env (passwords, CALLTAP_RCLONE_REMOTE) and rclone/rclone.conf
+# Edit .env (passwords, Cloudflare/Neko settings). No S3/R2 keys required in .env.
 docker compose up -d --build
 ```
 
-### Connect from your phone
-
-Phone browsers require **HTTPS** to share your microphone.
-
-- **Homelab / VPS with Tailscale (recommended, zero open ports):**
-  ```bash
-  ./deploy/homelab/tailscale-serve.sh
-  ```
-  Open Neko on `https://<machine>.<tailnet>.ts.net/` to log in to Sesame AI and make calls, and open `https://<machine>.<tailnet>.ts.net:8443/` for the CallTap dashboard.
-
-- **VPS without Tailscale:**
-  Set `NEKO_WEBRTC_NAT1TO1=<your-public-ip>` in `.env`, open TCP `80/443` and UDP `52000`, set `CALLTAP_DASHBOARD_USER`/`CALLTAP_DASHBOARD_PASS`, and point Caddy at `deploy/vps/Caddyfile`.
+Open the CallTap dashboard, click **Local Only** in the top bar whenever you want to connect Cloudflare R2, AWS S3, Backblaze B2 / Custom S3, or Google Drive, test the connection, and choose auto-upload or manual selection uploads.
 
 ## Local development & tests
 
 ```bash
+# Backend + tests
 uv venv --python 3.13 .venv
 uv pip install --python .venv/bin/python -e ".[dev]"
 .venv/bin/pytest
+
+# Frontend (React + Tailwind + Vercel Geist)
+cd web
+npm install
+npm run build   # or `npm run dev` with Vite proxy to :8090
 ```
+

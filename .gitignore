@@ -7,6 +7,9 @@ __pycache__/
 data/
 rclone/rclone.conf
 dist/
+web/dist/
+calltap/web_dist/
+*.tsbuildinfo
 build/
 *.egg-info/
 node_modules/
