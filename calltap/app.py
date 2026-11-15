@@ -4,12 +4,13 @@ import secrets
 from contextlib import asynccontextmanager
 from typing import Annotated, Literal
 
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel, Field
 
 from calltap.cdp import ChromeInspector
+from calltap.cf_access import CloudflareAccessVerifier
 from calltap.config import Settings
 from calltap.controller import CallController
 from calltap.db import CallDB
@@ -255,6 +256,7 @@ def create_app(
     settings: Settings | None = None,
     *,
     start_background: bool = True,
+    cf_verifier: CloudflareAccessVerifier | None = None,
 ) -> FastAPI:
     cfg = settings or Settings()
     cfg.ensure_dirs()
@@ -270,13 +272,31 @@ def create_app(
     uploader = CloudUploader(cfg, db)
     inspector = ChromeInspector(cfg.cdp_url, default_service=cfg.default_service)
     controller = CallController(cfg, db, pulse, recorder, uploader, inspector)
+    access_verifier = cf_verifier or CloudflareAccessVerifier(
+        team=cfg.cf_access_team,
+        audience=cfg.cf_access_aud,
+        allowed_emails=cfg.cf_access_email_set,
+    )
 
-    def require_auth(
+    async def require_auth(
+        request: Request,
         credentials: Annotated[HTTPBasicCredentials | None, Depends(_security)],
     ) -> None:
+        if access_verifier.enabled:
+            cf_jwt = request.headers.get("cf-access-jwt-assertion") or request.cookies.get(
+                "CF_Authorization"
+            )
+            if cf_jwt and await access_verifier.verify(cf_jwt) is not None:
+                return
+
         user = cfg.dashboard_user.strip()
         pw = cfg.dashboard_pass
         if not user:
+            if access_verifier.enabled:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Cloudflare Access authentication required",
+                )
             return
         if credentials is None:
             raise HTTPException(
@@ -308,6 +328,7 @@ def create_app(
     app.state.db = db
     app.state.controller = controller
     app.state.uploader = uploader
+    app.state.cf_verifier = access_verifier
 
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:

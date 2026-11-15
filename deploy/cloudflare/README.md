@@ -8,20 +8,27 @@ Public entry points for CallTap, no Tailscale required on the client:
 | `https://calltap.tuann04.cloud` | CallTap dashboard (:8090) | Cloudflare Access -> Cloudflare Tunnel -> `http://calltap:8090` |
 | `https://call.tuann04.cloud` | 1-tap wake Worker | Cloudflare Worker -> Azure API |
 
-## Authentication (Cloudflare Access + Passkeys)
+## Authentication (Cloudflare Access + Passkeys + SSO)
 
 Both `neko.` and `calltap.` are behind Cloudflare Access (Zero Trust, free tier).
 Logging in requires a passkey (Face ID / fingerprint) or an emailed one-time PIN,
-both restricted to the account owner's email. In-app passwords
-(`NEKO_ADMIN_PASSWORD`, `CALLTAP_DASHBOARD_PASS`) remain as a second layer but are
-no longer the front door.
+both restricted to the account owner's email. After authenticating with Access,
+no in-app password is needed:
+
+- **Neko (`neko.tuann04.cloud`)** uses Cloudflare Access OIDC (`CallTap Neko OIDC` app,
+  `NEKO_MEMBER_PROVIDER=oauth`, `NEKO_SESSION_COOKIE_ENABLED=true`) and grants admin
+  access to `Voanhtuan2004@gmail.com`.
+- **CallTap (`calltap.tuann04.cloud`)** verifies the `Cf-Access-Jwt-Assertion` header
+  against `tuann04.cloudflareaccess.com/cdn-cgi/access/certs` (`CALLTAP_CF_ACCESS_*`)
+  and keeps Basic Auth as a fallback for direct/local access.
 
 Config (created via `cf`):
 
 - IdP: `passkeys` (auto-prompt on), uid `1cfcf42d-c00a-429d-986e-fe8085fb07f9`
 - App `CallTap Neko` -> `neko.tuann04.cloud`, 24h session
+- App `CallTap Neko OIDC` -> SaaS OIDC for `https://neko.tuann04.cloud/api/oauth/callback`
 - App `CallTap Dashboard` -> `calltap.tuann04.cloud`, 24h session
-- Policy on both: allow email `Voanhtuan2004@gmail.com`
+- Policy on all apps: allow email `Voanhtuan2004@gmail.com`
 
 To enroll a passkey: open `https://neko.tuann04.cloud` in Safari, choose
 "Sign in with a passkey" -> "Don't have a passkey? Set one up", verify with OTP,

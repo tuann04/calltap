@@ -52,6 +52,22 @@ class Settings(BaseSettings):
     dashboard_user: str = ""
     dashboard_pass: str = ""
 
+    cf_access_team: str = ""
+    cf_access_aud: str = ""
+    cf_access_allowed_emails: str = ""
+
+    @property
+    def cf_access_enabled(self) -> bool:
+        return bool(self.cf_access_team.strip() and self.cf_access_aud.strip())
+
+    @property
+    def cf_access_email_set(self) -> set[str]:
+        return {
+            item.strip().lower()
+            for item in self.cf_access_allowed_emails.split(",")
+            if item.strip()
+        }
+
     def ensure_dirs(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.recordings_dir.mkdir(parents=True, exist_ok=True)

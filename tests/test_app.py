@@ -85,3 +85,98 @@ def test_app_dashboard_and_call_lifecycle(tmp_path: Path) -> None:
         r_audio = client.get(f"/api/calls/{call_id}/audio/you", auth=auth)
         assert r_audio.status_code == 200
         assert r_audio.content == b"fLaC-you"
+
+
+def test_cf_access_jwt_auth_and_fallback(tmp_path: Path) -> None:
+    import json
+    from datetime import UTC, datetime, timedelta
+
+    import jwt
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    from calltap.cf_access import CloudflareAccessVerifier
+
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    jwk_dict = json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(private_key.public_key()))
+    jwk_dict["kid"] = "test-kid-1"
+    jwk_dict["use"] = "sig"
+    jwk_dict["alg"] = "RS256"
+
+    aud = "test-aud-123"
+    team = "tuann04"
+    verifier = CloudflareAccessVerifier(
+        team=team,
+        audience=aud,
+        allowed_emails={"voanhtuan2004@gmail.com"},
+        jwks_override={"keys": [jwk_dict]},
+    )
+
+    cfg = Settings(
+        data_dir=tmp_path,
+        recordings_dir=tmp_path / "calls",
+        db_path=tmp_path / "calltap.db",
+        auto_detect=False,
+        dashboard_user="calltap",
+        dashboard_pass="secret",
+        cf_access_team=team,
+        cf_access_aud=aud,
+        cf_access_allowed_emails="Voanhtuan2004@gmail.com",
+    )
+    app = create_app(cfg, start_background=False, cf_verifier=verifier)
+
+    now = datetime.now(UTC)
+    valid_token = jwt.encode(
+        {
+            "aud": [aud],
+            "iss": "https://tuann04.cloudflareaccess.com",
+            "email": "Voanhtuan2004@gmail.com",
+            "exp": int((now + timedelta(minutes=10)).timestamp()),
+            "iat": int(now.timestamp()),
+        },
+        private_key,
+        algorithm="RS256",
+        headers={"kid": "test-kid-1"},
+    )
+    wrong_email_token = jwt.encode(
+        {
+            "aud": [aud],
+            "iss": "https://tuann04.cloudflareaccess.com",
+            "email": "other@example.com",
+            "exp": int((now + timedelta(minutes=10)).timestamp()),
+            "iat": int(now.timestamp()),
+        },
+        private_key,
+        algorithm="RS256",
+        headers={"kid": "test-kid-1"},
+    )
+
+    with TestClient(app) as client:
+        # Unauthenticated fails
+        assert client.get("/").status_code == 401
+        # Valid CF Access JWT passes without Basic Auth
+        assert (
+            client.get("/", headers={"Cf-Access-Jwt-Assertion": valid_token}).status_code == 200
+        )
+        # Wrong email is rejected
+        assert (
+            client.get("/", headers={"Cf-Access-Jwt-Assertion": wrong_email_token}).status_code
+            == 401
+        )
+        # Wrong audience is rejected
+        bad_aud_token = jwt.encode(
+            {
+                "aud": ["other-aud"],
+                "iss": "https://tuann04.cloudflareaccess.com",
+                "email": "Voanhtuan2004@gmail.com",
+                "exp": int((now + timedelta(minutes=10)).timestamp()),
+            },
+            private_key,
+            algorithm="RS256",
+            headers={"kid": "test-kid-1"},
+        )
+        assert (
+            client.get("/", headers={"Cf-Access-Jwt-Assertion": bad_aud_token}).status_code == 401
+        )
+        # Basic Auth fallback still works
+        assert client.get("/", auth=("calltap", "secret")).status_code == 200
+
