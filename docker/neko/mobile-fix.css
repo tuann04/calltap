@@ -95,6 +95,11 @@
     justify-content: center !important;
   }
 
+  [data-testid="header"] ul > li:has([data-testid="lock-control"]),
+  [data-testid="header"] ul > li:has([data-testid="lock-login"]) {
+    display: none !important;
+  }
+
   /* Keep video area strictly constrained and shrink huge 120px tap-to-unmute icon */
   .video-container {
     min-width: 0 !important;
@@ -102,6 +107,15 @@
     width: 100% !important;
     max-width: 100% !important;
     overflow: hidden !important;
+  }
+
+  .video-container,
+  .video-container canvas,
+  .video-container textarea {
+    touch-action: none !important;
+    -webkit-user-select: none !important;
+    user-select: none !important;
+    -webkit-touch-callout: none !important;
   }
 
   .video-container ul.right-5 {
