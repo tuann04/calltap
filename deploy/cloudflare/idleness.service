@@ -1,0 +1,7 @@
+[Unit]
+Description=CallTap idle check (every 5 minutes)
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/calltap/idle.env
+ExecStart=/usr/local/bin/idleness.sh

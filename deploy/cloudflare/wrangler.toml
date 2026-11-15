@@ -1,0 +1,12 @@
+name = "calltap-wake"
+main = "wake-worker.js"
+compatibility_date = "2026-11-01"
+
+[vars]
+NEKO_ORIGIN = "https://neko.tuann04.cloud"
+
+# Route through the existing tuann04.cloud zone. Create the Worker first
+# (wrangler deploy), then attach the route:
+#   cf workers routes create --zone tuann04.cloud --pattern "call.tuann04.cloud/*" --script calltap-wake
+# and add a 100-load-fail DNS record if needed (Workers route on proxied zones
+# does not need a DNS record when using a wildcard-less exact pattern).

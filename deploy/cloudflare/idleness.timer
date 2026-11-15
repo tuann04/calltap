@@ -1,0 +1,10 @@
+[Unit]
+Description=Check CallTap idleness every 5 minutes
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=5min
+Unit=idleness.service
+
+[Install]
+WantedBy=timers.target

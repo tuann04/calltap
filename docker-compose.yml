@@ -24,11 +24,26 @@ services:
       NEKO_WEBRTC_UDPMUX: "${NEKO_WEBRTC_UDPMUX:-52000}"
       NEKO_WEBRTC_TCPMUX: "${NEKO_WEBRTC_TCPMUX:-52000}"
       NEKO_WEBRTC_NAT1TO1: "${NEKO_WEBRTC_NAT1TO1:-}"
-      NEKO_WEBRTC_ICELITE: "true"
+      # ICE servers (e.g. Cloudflare Realtime TURN) require a full ICE agent.
+      NEKO_WEBRTC_ICELITE: "false"
+      # JSON arrays, rotated daily by deploy/cloudflare/turn-rotate.timer.
+      NEKO_WEBRTC_ICESERVERS_FRONTEND: "${NEKO_TURN_FRONTEND:-[]}"
+      NEKO_WEBRTC_ICESERVERS_BACKEND: "${NEKO_TURN_BACKEND:-[]}"
       NEKO_SESSION_IMPLICIT_HOSTING: "true"
     volumes:
       - chrome_profile:/home/neko/.config/calltap-chrome
       - pulse_sock:/var/run/pulse
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    # On the compose network so ingress hostnames (neko, calltap) resolve.
+    command: tunnel run
+    environment:
+      TUNNEL_TOKEN: "${CLOUDFLARED_TOKEN:-}"
+    depends_on:
+      - neko
+      - calltap
 
   calltap:
     build:

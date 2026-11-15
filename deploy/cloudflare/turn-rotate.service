@@ -1,0 +1,6 @@
+[Unit]
+Description=CallTap Cloudflare TURN credential rotation
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/turn-rotate.sh

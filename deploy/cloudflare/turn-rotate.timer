@@ -1,0 +1,14 @@
+[Unit]
+Description=Rotate Cloudflare TURN credentials daily and at boot
+
+[Timer]
+# 03:10 UTC daily (away from the VM's 02:00 shutdown window)
+OnCalendar=*-*-* 03:10:00 UTC
+RandomizedDelaySec=10m
+Persistent=true
+# Run soon after boot so credentials are fresh when the VM wakes.
+OnBootSec=2min
+Unit=turn-rotate.service
+
+[Install]
+WantedBy=timers.target
