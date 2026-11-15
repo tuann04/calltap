@@ -1,5 +1,6 @@
-"""Patch Neko's static frontend for responsive mobile viewport and reliable iOS touch control."""
+"""Patch Neko's static frontend for responsive mobile viewport, audio/mic controls, and reliable iOS touch."""
 
+import hashlib
 from pathlib import Path
 
 WWW_DIR = Path("/var/www")
@@ -16,9 +17,13 @@ def patch_index_html() -> None:
     elif new_vp not in html:
         raise RuntimeError("viewport meta tag not found in index.html")
 
+    css_path = WWW_DIR / "mobile-fix.css"
+    css_ver = hashlib.sha256(css_path.read_bytes()).hexdigest()[:8] if css_path.exists() else "1"
+    css_tag = f'    <link rel="stylesheet" href="./mobile-fix.css?v={css_ver}">'
+
     if "mobile-fix.css" not in html:
         assert "</head>" in html, "</head> not found in index.html"
-        html = html.replace("</head>", '    <link rel="stylesheet" href="./mobile-fix.css">\n  </head>', 1)
+        html = html.replace("</head>", f"{css_tag}\n  </head>", 1)
 
     index_path.write_text(html, "utf-8")
 
@@ -65,10 +70,80 @@ def patch_app_js() -> None:
         'else this.move(pt.p),this.button(1,!0),pt.down||this.button(1,!1)}}'
     )
 
-    old_play = 'onClick:()=>(o.unmute(),o.play().catch(()=>{}))'
-    new_play = 'onClick:()=>(o.unmute(),o.play().catch(()=>{}),o.implicitControl&&!o.controlling&&!o.state.control.host_id&&o.request())'
-    old_unmute = 'onClick:()=>o.unmute()'
-    new_unmute = 'onClick:()=>(o.unmute(),o.implicitControl&&!o.controlling&&!o.state.control.host_id&&o.request())'
+    old_set_muted = 'setMuted(e){this.video&&(this.video.muted=e),e||(this.state.video.mutedByAutoplay=!1,this.emitState())}'
+    new_set_muted = (
+        'setMuted(e){if(this.video){this.video.muted=e,'
+        'e||(this.state.video.mutedByAutoplay=!1,this.video.paused&&this.video.play().catch(()=>{}));'
+        'this.state.video.muted=this.video.muted,this.emitState()}}'
+    )
+
+    old_li = (
+        'function Li({hideControls:s,extraControls:e}){const{t}=V(),{client:o,overlay:i,app:a}=O(),l=ne(),'
+        '{admin:r,hosting:d,hosted:p,implicit:c,lockedControls:h,video:f}=k(o.store,Z(P=>({'
+        'admin:Y(P),hosting:ie(P),hosted:P.control.host_id!==null,implicit:P.settings.implicit_hosting,'
+        'lockedControls:P.settings.locked_controls,video:P.video}))),b=k(a,P=>P.emotes),w=v.useRef(null),'
+        '{fullscreen:C,request:N}=Ai(w),_=Ii(),U=Pi(),m=h&&!r,{playing:S,playable:T,muted:z,mutedByAutoplay:K}=f,'
+        'G=e?"":"phone:block hidden";return n.jsx("div",{className:"relative h-full w-full",'
+        'children:n.jsxs("div",{ref:w,className:"absolute inset-0 flex items-center justify-center bg-black",'
+        'children:[n.jsxs("div",{className:"absolute inset-0","data-testid":"player",onMouseEnter:_,'
+        'children:[n.jsx(Di,{transport:o.transport}),n.jsx("div",{className:"pointer-events-none absolute inset-0 '
+        'overflow-hidden",children:Object.entries(b).map(([P,x])=>n.jsx(Ci,{id:P,type:x},P))}),'
+        '!S&&T?n.jsx(A,{label:"Play",className:yt,"data-testid":"player-overlay",'
+        'onClick:()=>(o.unmute(),o.play().catch(()=>{})),children:n.jsx(At,{className:"size-[120px]"})}):'
+        'S&&z&&K&&n.jsx(A,{label:"Unmute",className:yt,"data-testid":"player-overlay",'
+        'onClick:()=>o.unmute(),children:n.jsx(It,{className:"size-[120px]"})})]}),'
+        '!C&&!s&&n.jsxs("ul",{className:"absolute top-[15px] right-5",children:['
+        'n.jsx("li",{className:"mb-2.5 last:mb-0",children:n.jsx(A,{variant:"video",label:"Fullscreen",onClick:N,'
+        'children:n.jsx(sn,{className:"size-4"})})}),'
+        'r&&n.jsx("li",{className:"mb-2.5 last:mb-0",children:n.jsxs(is,{children:[n.jsx(as,{asChild:!0,'
+        'children:n.jsx(A,{variant:"video",label:"Screen resolution","data-testid":"resolution-open",'
+        'children:n.jsx(Rt,{className:"size-4"})})}),n.jsx(Ti,{})]})}),'
+        '!m&&!c&&n.jsx("li",{className:F("mb-2.5 last:mb-0",G),children:n.jsx(A,{variant:"video",'
+        'label:t(d?"controls.release":"controls.request"),className:F(p&&!d&&"text-style-error/40",'
+        '!p&&!d&&"text-text-normal/40"),onClick:()=>T&&l.toggleControl(),children:n.jsx(Tt,{className:"size-4"})})})]})'
+    )
+
+    new_li = (
+        'function Li({hideControls:s,extraControls:e}){const{t}=V(),{client:o,overlay:i,app:a}=O(),l=ne(),'
+        '{admin:r,hosting:d,hosted:p,implicit:c,lockedControls:h,video:f,connected:cn,canShareMedia:cm}=k(o.store,Z(P=>({'
+        'admin:Y(P),hosting:ie(P),hosted:P.control.host_id!==null,implicit:P.settings.implicit_hosting,'
+        'lockedControls:P.settings.locked_controls,video:P.video,connected:P.connection.status==="connected",'
+        'canShareMedia:!!Pe(P)?.profile.can_share_media}))),b=k(a,P=>P.emotes),w=v.useRef(null),'
+        '{fullscreen:C,request:N}=Ai(w),_=Ii(),U=Pi(),m=h&&!r,{playing:S,playable:T,muted:z,mutedByAutoplay:K}=f,'
+        'G=e?"":"phone:block hidden",mr=v.useRef(null),[mo,ms2]=v.useState(!1),mg=d&&cm&&!!navigator.mediaDevices,'
+        'mx=()=>{mr.current&&(mr.current.stop(),mr.current.track.stop(),mr.current=null,ms2(!1))};'
+        'v.useEffect(()=>{(!mg||!cn)&&mx()},[mg,cn]);v.useEffect(()=>mx,[]);'
+        'const ml=async()=>{if(mr.current)return mx();try{const M=await navigator.mediaDevices.getUserMedia({audio:!0}),'
+        'he=M.getAudioTracks()[0];mr.current={track:he,stop:o.shareMedia(M)},ms2(!0)}catch(M){'
+        'Oe(a,t("controls.mic_error"),M.message)}};'
+        'return n.jsx("div",{className:"relative h-full w-full",'
+        'children:n.jsxs("div",{ref:w,className:"absolute inset-0 flex items-center justify-center bg-black",'
+        'children:[n.jsxs("div",{className:"absolute inset-0","data-testid":"player",onMouseEnter:_,'
+        'children:[n.jsx(Di,{transport:o.transport}),n.jsx("div",{className:"pointer-events-none absolute inset-0 '
+        'overflow-hidden",children:Object.entries(b).map(([P,x])=>n.jsx(Ci,{id:P,type:x},P))}),'
+        '!S&&T?n.jsx(A,{label:"Play",className:yt,"data-testid":"player-overlay",'
+        'onClick:()=>(o.unmute(),o.play().catch(()=>{}),o.implicitControl&&!o.controlling&&!o.state.control.host_id&&o.request()),'
+        'children:n.jsx(At,{className:"size-[120px]"})}):'
+        'S&&z&&K&&n.jsx(A,{label:"Unmute",className:yt,"data-testid":"player-overlay",'
+        'onClick:()=>(o.unmute(),o.implicitControl&&!o.controlling&&!o.state.control.host_id&&o.request()),'
+        'children:n.jsx(It,{className:"size-[120px]"})})]}),'
+        '!C&&!s&&n.jsxs("ul",{className:"absolute top-[15px] right-5",children:['
+        'n.jsx("li",{className:"mb-2.5 last:mb-0",children:n.jsx(A,{variant:"video",label:"Fullscreen",onClick:N,'
+        'children:n.jsx(sn,{className:"size-4"})})}),'
+        'r&&n.jsx("li",{className:"mb-2.5 last:mb-0",children:n.jsxs(is,{children:[n.jsx(as,{asChild:!0,'
+        'children:n.jsx(A,{variant:"video",label:"Screen resolution","data-testid":"resolution-open",'
+        'children:n.jsx(Rt,{className:"size-4"})})}),n.jsx(Ti,{})]})}),'
+        'n.jsx("li",{className:F("mb-2.5 last:mb-0",G),children:n.jsx(A,{variant:"video",'
+        'label:z?"Unmute":"Mute","data-testid":"mobile-mute","data-muted":z||void 0,'
+        'className:F(z&&"text-style-error"),onClick:()=>z?(o.unmute(),o.play().catch(()=>{})):o.mute(),'
+        'children:z?n.jsx(en,{className:"size-4"}):n.jsx(It,{className:"size-4"})})}),'
+        'mg&&n.jsx("li",{className:F("mb-2.5 last:mb-0",G),children:n.jsx(A,{variant:"video",'
+        'label:t(mo?"controls.mic_off":"controls.mic_on"),"data-testid":"mobile-mic","data-on":mo||void 0,'
+        'onClick:ml,children:mo?n.jsx(Xs,{className:"size-4"}):n.jsx(Qs,{className:"size-4"})})}),'
+        '!m&&!c&&n.jsx("li",{className:F("mb-2.5 last:mb-0",G),children:n.jsx(A,{variant:"video",'
+        'label:t(d?"controls.release":"controls.request"),className:F(p&&!d&&"text-style-error/40",'
+        '!p&&!d&&"text-text-normal/40"),onClick:()=>T&&l.toggleControl(),children:n.jsx(Tt,{className:"size-4"})})})]})'
+    )
 
     patched = False
     for js_path in candidates:
@@ -76,17 +151,17 @@ def patch_app_js() -> None:
         if old_touch_block not in js:
             continue
         assert js.count(old_touch_block) == 1, f"Expected 1 onTouch/onControl match in {js_path}"
-        assert js.count(old_play) == 1, f"Expected 1 Play overlay match in {js_path}"
-        assert js.count(old_unmute) == 1, f"Expected 1 Unmute overlay match in {js_path}"
+        assert js.count(old_set_muted) == 1, f"Expected 1 setMuted match in {js_path}"
+        assert js.count(old_li) == 1, f"Expected 1 Li() match in {js_path}"
         js = js.replace(old_touch_block, new_touch_block, 1)
-        js = js.replace(old_play, new_play, 1)
-        js = js.replace(old_unmute, new_unmute, 1)
+        js = js.replace(old_set_muted, new_set_muted, 1)
+        js = js.replace(old_li, new_li, 1)
         js_path.write_text(js, "utf-8")
         patched = True
         print(f"Patched Neko UI bundle: {js_path}")
 
     if not patched:
-        raise RuntimeError("Did not find expected Neko onTouch/onControl block in /var/www/assets/index-*.js")
+        raise RuntimeError("Did not find expected Neko bundle patterns in /var/www/assets/index-*.js")
 
 
 if __name__ == "__main__":

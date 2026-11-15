@@ -127,6 +127,16 @@
     margin-bottom: 6px !important;
   }
 
+  [data-testid="mobile-mute"][data-muted="true"] {
+    background: rgba(220, 38, 38, 0.85) !important;
+    color: #fff !important;
+  }
+
+  [data-testid="mobile-mic"][data-on="true"] {
+    background: rgba(16, 185, 129, 0.85) !important;
+    color: #fff !important;
+  }
+
   [data-testid="player-overlay"] svg {
     width: 48px !important;
     height: 48px !important;
