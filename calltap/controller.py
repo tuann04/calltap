@@ -13,6 +13,14 @@ from calltap.db import CallDB
 from calltap.models import CallFiles, CallMetadata, CallStatus, UploadStatus
 from calltap.pulse import PulseMonitor
 from calltap.recorder import DualTrackRecorder
+from calltap.telemetry import (
+    CALL_DURATION,
+    CALLS_ACTIVE,
+    CALLS_COMPLETED,
+    CALLS_STARTED,
+    PULSE_HEALTHY,
+    start_span,
+)
 from calltap.uploader import CloudUploader, write_meta_file
 from calltap.waveform import ensure_call_waveform
 
@@ -104,48 +112,78 @@ class CallController:
             tab = await self.inspector.active_tab()
             service = service_override or tab.service or self.settings.default_service
 
-            files = CallFiles(
-                you="you.flac",
-                agent="agent.flac",
-                mix="mix.opus" if self.settings.create_stereo_mix else None,
-            )
-            meta = CallMetadata(
-                call_id=call_id,
-                title=title.strip(),
-                service=service,
-                trigger=trigger,
-                page_url=tab.url,
-                page_title=tab.title,
-                started_at=now,
-                sample_rate=self.settings.sample_rate,
-                files=files,
-                tags=tags or [],
-                local_rel_dir=rel_dir,
-                status=CallStatus.RECORDING,
-                upload_status=(
-                    UploadStatus.PENDING
-                    if self.uploader.auto_upload_enabled
-                    else UploadStatus.DISABLED
-                ),
-            )
+            with start_span(
+                "call.start",
+                {
+                    "call.id": call_id,
+                    "call.service": service,
+                    "call.trigger": trigger,
+                    "call.page_url": tab.url or "",
+                },
+            ):
+                files = CallFiles(
+                    you="you.flac",
+                    agent="agent.flac",
+                    mix="mix.opus" if self.settings.create_stereo_mix else None,
+                )
+                meta = CallMetadata(
+                    call_id=call_id,
+                    title=title.strip(),
+                    service=service,
+                    trigger=trigger,
+                    page_url=tab.url,
+                    page_title=tab.title,
+                    started_at=now,
+                    sample_rate=self.settings.sample_rate,
+                    files=files,
+                    tags=tags or [],
+                    local_rel_dir=rel_dir,
+                    status=CallStatus.RECORDING,
+                    upload_status=(
+                        UploadStatus.PENDING
+                        if self.uploader.auto_upload_enabled
+                        else UploadStatus.DISABLED
+                    ),
+                )
 
-            call_dir = self.settings.recordings_dir / rel_dir
-            write_meta_file(call_dir, meta)
-            self.db.upsert_call(meta)
-
-            try:
-                await self.recorder.start(call_dir)
-            except Exception as exc:
-                meta.status = CallStatus.ERROR
-                meta.ended_at = datetime.now(UTC)
-                meta.upload_error = f"Recorder failed to start: {exc}"
+                call_dir = self.settings.recordings_dir / rel_dir
                 write_meta_file(call_dir, meta)
                 self.db.upsert_call(meta)
-                raise
 
-            self._active_meta = meta
-            self._mic_lost_at = None
-            return meta
+                try:
+                    await self.recorder.start(call_dir)
+                except Exception as exc:
+                    meta.status = CallStatus.ERROR
+                    meta.ended_at = datetime.now(UTC)
+                    meta.upload_error = f"Recorder failed to start: {exc}"
+                    write_meta_file(call_dir, meta)
+                    self.db.upsert_call(meta)
+                    CALLS_COMPLETED.labels(status=CallStatus.ERROR.value, service=service).inc()
+                    logger.error(
+                        "Call %s failed to start: %s",
+                        call_id,
+                        exc,
+                        extra={"call_id": call_id, "service": service, "trigger": trigger},
+                    )
+                    raise
+
+                self._active_meta = meta
+                self._mic_lost_at = None
+                CALLS_STARTED.labels(trigger=trigger, service=service).inc()
+                CALLS_ACTIVE.set(1)
+                logger.info(
+                    "Call %s started (%s via %s)",
+                    call_id,
+                    service,
+                    trigger,
+                    extra={
+                        "call_id": call_id,
+                        "service": service,
+                        "trigger": trigger,
+                        "page_url": tab.url,
+                    },
+                )
+                return meta
 
     async def stop_call(self, *, reason: str = "manual") -> CallMetadata | None:
         async with self._lock:
@@ -153,44 +191,67 @@ class CallController:
                 return None
 
             meta = self._active_meta
-            meta.status = CallStatus.FINALIZING
-            self.db.upsert_call(meta)
+            with start_span(
+                "call.stop",
+                {"call.id": meta.call_id, "call.service": meta.service, "call.stop_reason": reason},
+            ):
+                meta.status = CallStatus.FINALIZING
+                self.db.upsert_call(meta)
 
-            result = await self.recorder.stop()
-            ended_at = datetime.now(UTC)
-            meta.ended_at = ended_at
-            meta.duration_seconds = max(
-                0.0, round((ended_at - meta.started_at).total_seconds(), 2)
-            )
-            if result.exit_code != 0 and not result.you_path.exists():
-                meta.status = CallStatus.ERROR
-                meta.upload_error = f"ffmpeg exited {result.exit_code}: {result.stderr_tail}"
-            else:
-                meta.status = CallStatus.COMPLETED
-                meta.upload_status = (
-                    UploadStatus.PENDING
-                    if self.uploader.auto_upload_enabled
-                    else UploadStatus.DISABLED
+                result = await self.recorder.stop()
+                ended_at = datetime.now(UTC)
+                meta.ended_at = ended_at
+                meta.duration_seconds = max(
+                    0.0, round((ended_at - meta.started_at).total_seconds(), 2)
+                )
+                if result.exit_code != 0 and not result.you_path.exists():
+                    meta.status = CallStatus.ERROR
+                    meta.upload_error = f"ffmpeg exited {result.exit_code}: {result.stderr_tail}"
+                else:
+                    meta.status = CallStatus.COMPLETED
+                    meta.upload_status = (
+                        UploadStatus.PENDING
+                        if self.uploader.auto_upload_enabled
+                        else UploadStatus.DISABLED
+                    )
+
+                call_dir = self.settings.recordings_dir / meta.local_rel_dir
+                write_meta_file(call_dir, meta)
+                self.db.upsert_call(meta)
+
+                self._active_meta = None
+                self._mic_lost_at = None
+                self._upload_wake.set()
+
+                CALLS_ACTIVE.set(0)
+                CALLS_COMPLETED.labels(status=meta.status.value, service=meta.service).inc()
+                CALL_DURATION.labels(service=meta.service).observe(meta.duration_seconds)
+                logger.info(
+                    "Call %s stopped (%s, %.1fs, status=%s)",
+                    meta.call_id,
+                    reason,
+                    meta.duration_seconds,
+                    meta.status.value,
+                    extra={
+                        "call_id": meta.call_id,
+                        "service": meta.service,
+                        "duration_seconds": meta.duration_seconds,
+                        "status": meta.status.value,
+                        "reason": reason,
+                    },
                 )
 
-            call_dir = self.settings.recordings_dir / meta.local_rel_dir
-            write_meta_file(call_dir, meta)
-            self.db.upsert_call(meta)
+                if meta.status == CallStatus.COMPLETED:
+                    task = asyncio.create_task(self._generate_waveform_safe(call_dir, meta))
+                    self._bg_tasks.add(task)
+                    task.add_done_callback(self._bg_tasks.discard)
 
-            self._active_meta = None
-            self._mic_lost_at = None
-            self._upload_wake.set()
-
-            if meta.status == CallStatus.COMPLETED:
-                task = asyncio.create_task(self._generate_waveform_safe(call_dir, meta))
-                self._bg_tasks.add(task)
-                task.add_done_callback(self._bg_tasks.discard)
-
-            return meta
+                return meta
 
     async def _generate_waveform_safe(self, call_dir: Path, meta: CallMetadata) -> None:
         try:
-            await ensure_call_waveform(call_dir, meta)
+            with start_span("call.waveform", {"call.id": meta.call_id}):
+                await ensure_call_waveform(call_dir, meta)
         except Exception as exc:  # noqa: BLE001
             logger.warning("Waveform generation failed for %s: %s", meta.call_id, exc)
 
@@ -262,6 +323,7 @@ class CallController:
             try:
                 if self.auto_detect:
                     capture = await self.pulse.active_browser_capture()
+                    PULSE_HEALTHY.set(1)
                     if capture is not None:
                         self._mic_lost_at = None
                         if not self.recorder.is_recording:
@@ -280,6 +342,7 @@ class CallController:
             except asyncio.CancelledError:
                 raise
             except (OSError, RuntimeError) as exc:
+                PULSE_HEALTHY.set(0)
                 logger.warning("Monitor loop error: %s", exc)
 
             try:

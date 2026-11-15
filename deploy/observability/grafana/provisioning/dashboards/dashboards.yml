@@ -1,0 +1,13 @@
+apiVersion: 1
+
+providers:
+  - name: CallTap
+    orgId: 1
+    folder: CallTap
+    type: file
+    disableDeletion: false
+    editable: true
+    updateIntervalSeconds: 30
+    options:
+      path: /etc/grafana/provisioning/dashboards
+      foldersFromFilesStructure: false

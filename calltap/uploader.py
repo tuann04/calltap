@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -10,6 +12,9 @@ from calltap.config import Settings
 from calltap.db import CallDB
 from calltap.models import CallMetadata, UploadStatus
 from calltap.storage import RcloneTarget, StorageManager
+from calltap.telemetry import UPLOAD_DURATION, UPLOADS_TOTAL, start_span
+
+logger = logging.getLogger(__name__)
 
 
 def build_remote_uri(remote: str, prefix: str, local_rel_dir: str) -> str:
@@ -100,11 +105,10 @@ class CloudUploader:
                     headers={"Title": f"CallTap: {meta.call_id}"},
                 )
         except httpx.HTTPError as exc:
-            import logging
-
-            logging.getLogger(__name__).warning("ntfy notification failed: %s", exc)
+            logger.warning("ntfy notification failed: %s", exc)
 
     async def upload_one(self, meta: CallMetadata) -> CallMetadata:
+        started = time.perf_counter()
         target = self._target()
         if target is None:
             updated = self.db.update_upload_state(
@@ -112,76 +116,99 @@ class CloudUploader:
             )
             return updated or meta
 
-        call_dir = self.settings.recordings_dir / meta.local_rel_dir
-        if not call_dir.exists():
+        with start_span(
+            "call.upload",
+            {"call.id": meta.call_id, "upload.attempt": meta.upload_attempts + 1},
+        ):
+            call_dir = self.settings.recordings_dir / meta.local_rel_dir
+            if not call_dir.exists():
+                updated = self.db.update_upload_state(
+                    meta.call_id,
+                    UploadStatus.FAILED,
+                    attempts=meta.upload_attempts + 1,
+                    error=f"Local call directory missing: {call_dir}",
+                )
+                UPLOADS_TOTAL.labels(status=UploadStatus.FAILED.value).inc()
+                return updated or meta
+
+            remote_uri = build_remote_uri(
+                target.remote,
+                target.prefix,
+                meta.local_rel_dir,
+            )
+
+            attempts = meta.upload_attempts + 1
+            self.db.update_upload_state(
+                meta.call_id, UploadStatus.UPLOADING, attempts=attempts, error=None
+            )
+
+            # Ensure meta.json on disk is fresh before copying.
+            write_meta_file(call_dir, meta)
+
+            rc, out = await self._run_rclone(
+                "copy",
+                str(call_dir),
+                remote_uri,
+                "--transfers=4",
+                "--retries=3",
+                target=target,
+            )
+            if rc == 0:
+                rc_chk, chk_out = await self._run_rclone(
+                    "check",
+                    str(call_dir),
+                    remote_uri,
+                    "--one-way",
+                    "--size-only",
+                    target=target,
+                )
+                if rc_chk != 0:
+                    rc = rc_chk
+                    out = f"rclone check failed: {chk_out}"
+
+            UPLOAD_DURATION.observe(max(0.0, time.perf_counter() - started))
+
+            if rc == 0:
+                now = datetime.now(UTC)
+                updated = self.db.update_upload_state(
+                    meta.call_id,
+                    UploadStatus.UPLOADED,
+                    attempts=attempts,
+                    error=None,
+                    remote_uri=remote_uri,
+                    uploaded_at=now,
+                )
+                UPLOADS_TOTAL.labels(status=UploadStatus.UPLOADED.value).inc()
+                logger.info(
+                    "Uploaded call %s to %s",
+                    meta.call_id,
+                    remote_uri,
+                    extra={"call_id": meta.call_id, "remote_uri": remote_uri},
+                )
+                if updated:
+                    write_meta_file(call_dir, updated)
+                    await self._notify(updated)
+                    return updated
+                return meta
+
+            err_msg = out.strip() or f"rclone exited with code {rc}"
+            retry_at = datetime.now(UTC) + timedelta(seconds=backoff_seconds(attempts))
             updated = self.db.update_upload_state(
                 meta.call_id,
                 UploadStatus.FAILED,
-                attempts=meta.upload_attempts + 1,
-                error=f"Local call directory missing: {call_dir}",
+                attempts=attempts,
+                error=err_msg,
+                next_retry_at=retry_at,
+            )
+            UPLOADS_TOTAL.labels(status=UploadStatus.FAILED.value).inc()
+            logger.warning(
+                "Upload failed for call %s (attempt %d): %s",
+                meta.call_id,
+                attempts,
+                err_msg,
+                extra={"call_id": meta.call_id, "attempt": attempts},
             )
             return updated or meta
-
-        remote_uri = build_remote_uri(
-            target.remote,
-            target.prefix,
-            meta.local_rel_dir,
-        )
-
-        attempts = meta.upload_attempts + 1
-        self.db.update_upload_state(
-            meta.call_id, UploadStatus.UPLOADING, attempts=attempts, error=None
-        )
-
-        # Ensure meta.json on disk is fresh before copying.
-        write_meta_file(call_dir, meta)
-
-        rc, out = await self._run_rclone(
-            "copy",
-            str(call_dir),
-            remote_uri,
-            "--transfers=4",
-            "--retries=3",
-            target=target,
-        )
-        if rc == 0:
-            rc_chk, chk_out = await self._run_rclone(
-                "check",
-                str(call_dir),
-                remote_uri,
-                "--one-way",
-                "--size-only",
-                target=target,
-            )
-            if rc_chk != 0:
-                rc = rc_chk
-                out = f"rclone check failed: {chk_out}"
-
-        if rc == 0:
-            now = datetime.now(UTC)
-            updated = self.db.update_upload_state(
-                meta.call_id,
-                UploadStatus.UPLOADED,
-                attempts=attempts,
-                error=None,
-                remote_uri=remote_uri,
-                uploaded_at=now,
-            )
-            if updated:
-                write_meta_file(call_dir, updated)
-                await self._notify(updated)
-                return updated
-            return meta
-
-        retry_at = datetime.now(UTC) + timedelta(seconds=backoff_seconds(attempts))
-        updated = self.db.update_upload_state(
-            meta.call_id,
-            UploadStatus.FAILED,
-            attempts=attempts,
-            error=out.strip() or f"rclone exited with code {rc}",
-            next_retry_at=retry_at,
-        )
-        return updated or meta
 
     def prune_expired_local_audio(self, now: datetime | None = None) -> int:
         days = self.settings.local_retention_days

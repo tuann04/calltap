@@ -48,6 +48,8 @@ services:
       # JSON arrays, rotated daily by deploy/cloudflare/turn-rotate.timer.
       NEKO_WEBRTC_ICESERVERS_FRONTEND: "${NEKO_TURN_FRONTEND:-[]}"
       NEKO_WEBRTC_ICESERVERS_BACKEND: "${NEKO_TURN_BACKEND:-[]}"
+      NEKO_LOG_JSON: "true"
+      NEKO_LOG_LEVEL: "${NEKO_LOG_LEVEL:-info}"
     volumes:
       - chrome_profile:/home/neko/.config/calltap-chrome
       - pulse_sock:/var/run/pulse
@@ -55,7 +57,7 @@ services:
   cloudflared:
     image: cloudflare/cloudflared:latest
     restart: unless-stopped
-    # On the compose network so ingress hostnames (neko, calltap) resolve.
+    # On the compose network so ingress hostnames (neko, calltap, grafana) resolve.
     command: tunnel run
     environment:
       TUNNEL_TOKEN: "${CLOUDFLARED_TOKEN:-}"
@@ -81,11 +83,96 @@ services:
     environment:
       CALLTAP_PULSE_SERVER: "unix:/var/run/pulse/pulseaudio.socket"
       CALLTAP_CDP_URL: "http://neko:9222"
+      CALLTAP_LOG_JSON: "${CALLTAP_LOG_JSON:-true}"
+      CALLTAP_OTLP_ENDPOINT: "${CALLTAP_OTLP_ENDPOINT:-http://alloy:4318/v1/traces}"
     volumes:
       - pulse_sock:/var/run/pulse
       - ./data:/data
       - ./rclone:/config/rclone
 
+  loki:
+    image: grafana/loki:3.3.2
+    restart: unless-stopped
+    command: ["-config.file=/etc/loki/local-config.yaml"]
+    mem_limit: 256m
+    environment:
+      GOMEMLIMIT: "200MiB"
+    volumes:
+      - ./deploy/observability/loki/loki.yml:/etc/loki/local-config.yaml:ro
+      - loki_data:/loki
+
+  tempo:
+    image: grafana/tempo:2.7.2
+    restart: unless-stopped
+    command: ["-config.file=/etc/tempo.yaml"]
+    mem_limit: 256m
+    environment:
+      GOMEMLIMIT: "200MiB"
+    volumes:
+      - ./deploy/observability/tempo/tempo.yml:/etc/tempo.yaml:ro
+      - tempo_data:/var/tempo
+
+  mimir:
+    image: grafana/mimir:2.15.0
+    restart: unless-stopped
+    command: ["-config.file=/etc/mimir.yaml"]
+    mem_limit: 384m
+    environment:
+      GOMEMLIMIT: "300MiB"
+    volumes:
+      - ./deploy/observability/mimir/mimir.yml:/etc/mimir.yaml:ro
+      - mimir_data:/data/mimir
+
+  alloy:
+    image: grafana/alloy:v1.7.5
+    restart: unless-stopped
+    command:
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.alloy
+    mem_limit: 160m
+    environment:
+      GOMEMLIMIT: "120MiB"
+    depends_on:
+      - loki
+      - tempo
+      - mimir
+    volumes:
+      - ./deploy/observability/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+      - alloy_data:/var/lib/alloy/data
+
+  grafana:
+    image: grafana/grafana:11.5.2
+    restart: unless-stopped
+    mem_limit: 256m
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      - loki
+      - tempo
+      - mimir
+    environment:
+      GOMEMLIMIT: "200MiB"
+      GF_SECURITY_ADMIN_USER: "${GRAFANA_ADMIN_USER:-admin}"
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:-calltap-grafana}"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: "/etc/grafana/provisioning/dashboards/calltap-neko.json"
+    volumes:
+      - ./deploy/observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+
 volumes:
   chrome_profile:
   pulse_sock:
+  loki_data:
+  tempo_data:
+  mimir_data:
+  alloy_data:
+  grafana_data:

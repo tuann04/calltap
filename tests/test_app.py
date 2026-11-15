@@ -180,3 +180,51 @@ def test_cf_access_jwt_auth_and_fallback(tmp_path: Path) -> None:
         # Basic Auth fallback still works
         assert client.get("/", auth=("calltap", "secret")).status_code == 200
 
+
+def test_metrics_and_telemetry_endpoints(tmp_path: Path) -> None:
+    cfg = Settings(
+        data_dir=tmp_path,
+        recordings_dir=tmp_path / "calls",
+        db_path=tmp_path / "calltap.db",
+        auto_detect=False,
+        dashboard_user="tuan",
+        dashboard_pass="secret",
+        log_json=False,
+    )
+    app = create_app(cfg, start_background=False)
+    auth = ("tuan", "secret")
+
+    with TestClient(app) as client:
+        assert client.post("/api/telemetry", json={"event": "x"}).status_code == 401
+        r_tel = client.post(
+            "/api/telemetry",
+            json={
+                "events": [
+                    {
+                        "event": "page_load",
+                        "level": "info",
+                        "source": "web",
+                        "message": "loaded",
+                        "data": {"path": "/"},
+                    },
+                    {
+                        "event": "audio_error",
+                        "level": "error",
+                        "source": "web",
+                        "message": "decode error",
+                    },
+                ]
+            },
+            auth=auth,
+        )
+        assert r_tel.status_code == 200
+        assert r_tel.json() == {"accepted": 2}
+
+        r_metrics = client.get("/metrics")
+        assert r_metrics.status_code == 200
+        body = r_metrics.text
+        assert "calltap_calls_active" in body
+        assert "calltap_pending_uploads" in body
+        assert 'calltap_browser_events_total{event="page_load",level="info",source="web"}' in body
+
+

@@ -1,16 +1,19 @@
 from __future__ import annotations
 
+import logging
 import re
 import secrets
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 from urllib.parse import urlparse
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, status
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel, Field
 
 from calltap.cdp import ChromeInspector
@@ -22,10 +25,22 @@ from calltap.models import CallMetadata, StorageConfig, StoragePublicView, Uploa
 from calltap.pulse import PulseMonitor
 from calltap.recorder import DualTrackRecorder
 from calltap.storage import StorageManager
+from calltap.telemetry import (
+    BROWSER_EVENTS,
+    CALLS_ACTIVE,
+    HTTP_DURATION,
+    HTTP_REQUESTS,
+    PENDING_UPLOADS,
+    PULSE_HEALTHY,
+    configure_logging,
+    configure_telemetry,
+    start_span,
+)
 from calltap.uploader import CloudUploader, write_meta_file
 from calltap.waveform import ensure_call_waveform
 
 _security = HTTPBasic(auto_error=False)
+_client_logger = logging.getLogger("calltap.client")
 
 
 class StartCallRequest(BaseModel):
@@ -53,6 +68,18 @@ class BulkCallsRequest(BaseModel):
 class StorageTestResponse(BaseModel):
     ok: bool
     message: str
+
+
+class TelemetryEvent(BaseModel):
+    event: str = Field(min_length=1, max_length=80)
+    level: Literal["debug", "info", "warn", "warning", "error"] = "info"
+    source: str = Field(default="web", max_length=40)
+    message: str = Field(default="", max_length=500)
+    data: dict[str, Any] = Field(default_factory=dict)
+
+
+class TelemetryBatchRequest(BaseModel):
+    events: list[TelemetryEvent] = Field(default_factory=list, max_length=50)
 
 
 def _resolve_web_dist() -> Path | None:
@@ -155,6 +182,8 @@ def create_app(
                 headers={"WWW-Authenticate": "Basic"},
             )
 
+    configure_logging(log_json=cfg.log_json)
+
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
         if start_background:
@@ -172,6 +201,30 @@ def create_app(
     app.state.controller = controller
     app.state.uploader = uploader
     app.state.cf_verifier = access_verifier
+    configure_telemetry(app, cfg)
+
+    @app.middleware("http")
+    async def _metrics_middleware(request: Request, call_next: Any) -> Response:
+        path = request.url.path
+        if path in ("/metrics", "/healthz"):
+            return await call_next(request)
+        started = time.perf_counter()
+        status_code = 500
+        try:
+            response = await call_next(request)
+            status_code = response.status_code
+            return response
+        finally:
+            route = request.scope.get("route")
+            route_path = getattr(route, "path", path)
+            HTTP_REQUESTS.labels(
+                method=request.method,
+                path=route_path,
+                status=str(status_code),
+            ).inc()
+            HTTP_DURATION.labels(method=request.method, path=route_path).observe(
+                max(0.0, time.perf_counter() - started)
+            )
 
     dist_dir = _resolve_web_dist()
     if dist_dir is not None and (dist_dir / "assets").is_dir():
@@ -180,6 +233,34 @@ def create_app(
     @app.get("/healthz")
     async def healthz() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/metrics")
+    async def metrics() -> Response:
+        if not cfg.metrics_enabled:
+            raise HTTPException(status_code=404, detail="Metrics disabled")
+        CALLS_ACTIVE.set(1 if controller.active_call is not None else 0)
+        PENDING_UPLOADS.set(db.count_pending_uploads())
+        return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+    @app.post("/api/telemetry", dependencies=[Depends(require_auth)])
+    async def ingest_telemetry(body: TelemetryBatchRequest | TelemetryEvent) -> dict[str, int]:
+        events = body.events if isinstance(body, TelemetryBatchRequest) else [body]
+        with start_span("client.telemetry", {"telemetry.count": len(events)}):
+            for ev in events:
+                lvl = "warning" if ev.level == "warn" else ev.level
+                BROWSER_EVENTS.labels(source=ev.source, event=ev.event, level=lvl).inc()
+                log_fn = getattr(_client_logger, lvl, _client_logger.info)
+                log_fn(
+                    "client event %s: %s",
+                    ev.event,
+                    ev.message or "-",
+                    extra={
+                        "client_source": ev.source,
+                        "client_event": ev.event,
+                        "client_data": ev.data,
+                    },
+                )
+        return {"accepted": len(events)}
 
     @app.get("/", response_class=HTMLResponse, dependencies=[Depends(require_auth)])
     async def index() -> HTMLResponse:
@@ -190,6 +271,9 @@ def create_app(
     @app.get("/api/status", dependencies=[Depends(require_auth)])
     async def get_status() -> dict[str, object]:
         pulse_ok = await pulse.is_healthy()
+        PULSE_HEALTHY.set(1 if pulse_ok else 0)
+        pending = db.count_pending_uploads()
+        PENDING_UPLOADS.set(pending)
         tab = await inspector.active_tab()
         storage_view = storage.public_view()
         return {
@@ -198,7 +282,7 @@ def create_app(
             "pulse_healthy": pulse_ok,
             "rclone_remote": storage_view.remote_label if storage_view.connected else None,
             "storage": storage_view.model_dump(),
-            "pending_uploads": db.count_pending_uploads(),
+            "pending_uploads": pending,
             "active_tab": {"service": tab.service, "url": tab.url, "title": tab.title},
         }
 

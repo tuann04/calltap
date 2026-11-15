@@ -1,0 +1,162 @@
+logging {
+  level  = "warn"
+  format = "logfmt"
+}
+
+// --- Docker Container Discovery & Logs -> Loki ---
+discovery.docker "containers" {
+  host             = "unix:///var/run/docker.sock"
+  refresh_interval = "15s"
+}
+
+discovery.relabel "docker_logs" {
+  targets = discovery.docker.containers.targets
+
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_service"]
+    target_label  = "service_name"
+  }
+
+  rule {
+    source_labels = ["__meta_docker_container_label_com_docker_compose_project"]
+    target_label  = "compose_project"
+  }
+
+  rule {
+    source_labels = ["service_name"]
+    regex         = ".+"
+    action        = "keep"
+  }
+}
+
+loki.source.docker "containers" {
+  host       = "unix:///var/run/docker.sock"
+  targets    = discovery.relabel.docker_logs.output
+  forward_to = [loki.process.docker_logs.receiver]
+}
+
+loki.process "docker_logs" {
+  stage.json {
+    expressions = {
+      level    = "level",
+      trace_id = "trace_id",
+      logger   = "logger",
+      module   = "module",
+    }
+  }
+
+  stage.labels {
+    values = {
+      level = "",
+    }
+  }
+
+  stage.structured_metadata {
+    values = {
+      trace_id = "",
+      logger   = "",
+      module   = "",
+    }
+  }
+
+  forward_to = [loki.write.local.receiver]
+}
+
+loki.write "local" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}
+
+// --- Metrics (Neko + CallTap + VM Host + Alloy) -> Mimir ---
+prometheus.exporter.unix "host" {
+  procfs_path = "/host/proc"
+  sysfs_path  = "/host/sys"
+  rootfs_path = "/rootfs"
+  set_collectors = [
+    "cpu",
+    "filesystem",
+    "loadavg",
+    "meminfo",
+    "netdev",
+  ]
+}
+
+prometheus.scrape "host" {
+  targets         = prometheus.exporter.unix.host.targets
+  scrape_interval = "15s"
+  job_name        = "vm-host"
+  forward_to      = [prometheus.remote_write.mimir.receiver]
+}
+
+prometheus.scrape "neko" {
+  targets = [
+    { "__address__" = "neko:8080", "service" = "neko" },
+  ]
+  scrape_interval = "15s"
+  job_name        = "neko"
+  forward_to      = [prometheus.remote_write.mimir.receiver]
+}
+
+prometheus.scrape "calltap" {
+  targets = [
+    { "__address__" = "calltap:8090", "service" = "calltap" },
+  ]
+  scrape_interval = "15s"
+  job_name        = "calltap"
+  forward_to      = [prometheus.remote_write.mimir.receiver]
+}
+
+prometheus.scrape "alloy" {
+  targets = [
+    { "__address__" = "127.0.0.1:12345", "service" = "alloy" },
+  ]
+  scrape_interval = "30s"
+  job_name        = "alloy"
+  forward_to      = [prometheus.remote_write.mimir.receiver]
+}
+
+prometheus.remote_write "mimir" {
+  endpoint {
+    url = "http://mimir:9009/api/v1/push"
+  }
+}
+
+// --- OTLP Traces -> Tempo ---
+otelcol.receiver.otlp "default" {
+  grpc {
+    endpoint = "0.0.0.0:4317"
+  }
+  http {
+    endpoint = "0.0.0.0:4318"
+  }
+
+  output {
+    traces = [otelcol.processor.batch.default.input]
+  }
+}
+
+otelcol.processor.batch "default" {
+  timeout             = "2s"
+  send_batch_size     = 256
+  send_batch_max_size = 512
+
+  output {
+    traces = [otelcol.exporter.otlp.tempo.input]
+  }
+}
+
+otelcol.exporter.otlp "tempo" {
+  client {
+    endpoint = "tempo:4317"
+    tls {
+      insecure = true
+    }
+  }
+}

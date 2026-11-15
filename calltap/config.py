@@ -56,6 +56,11 @@ class Settings(BaseSettings):
     cf_access_aud: str = ""
     cf_access_allowed_emails: str = ""
 
+    otlp_endpoint: str = ""
+    service_name: str = "calltap"
+    log_json: bool = False
+    metrics_enabled: bool = True
+
     @property
     def cf_access_enabled(self) -> bool:
         return bool(self.cf_access_team.strip() and self.cf_access_aud.strip())
