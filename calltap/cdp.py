@@ -26,7 +26,7 @@ _DOMAIN_TO_SERVICE: list[tuple[str, str]] = [
 ]
 
 
-def classify_service_from_url(url: str | None, default: str = "generic") -> str:
+def classify_service_from_url(url: str | None, default: str = "unknown") -> str:
     if not url:
         return default
     host = (urlparse(url).hostname or "").lower()
@@ -39,7 +39,7 @@ def classify_service_from_url(url: str | None, default: str = "generic") -> str:
 class ChromeInspector:
     """Optional Chrome DevTools Protocol inspector for service detection."""
 
-    def __init__(self, cdp_url: str, default_service: str = "generic") -> None:
+    def __init__(self, cdp_url: str, default_service: str = "unknown") -> None:
         self.cdp_url = cdp_url.rstrip("/")
         self.default_service = default_service
 

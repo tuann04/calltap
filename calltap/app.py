@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import re
 import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Literal
+from urllib.parse import urlparse
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse, HTMLResponse
@@ -74,6 +76,21 @@ def _fallback_html() -> str:
   <p>Frontend bundle not found. Run <code>cd web &amp;&amp; npm run build</code>.</p>
 </body>
 </html>"""
+
+
+def _download_filename(meta: CallMetadata, fname: str) -> str:
+    if meta.title.strip():
+        base = meta.title.strip()
+    else:
+        label = meta.service
+        if label in ("unknown", "generic", "") and meta.page_url:
+            host = (urlparse(meta.page_url).hostname or "").lower().removeprefix("www.")
+            if host:
+                label = host
+        stamp = meta.started_at.strftime("%Y-%m-%d_%H-%M")
+        base = f"{label}-{stamp}"
+    slug = re.sub(r"[^a-zA-Z0-9._-]+", "-", base).strip("-._").lower() or meta.call_id
+    return f"{slug[:80]}-{fname}"
 
 
 def create_app(
@@ -222,6 +239,8 @@ def create_app(
                 or needle in c.service.lower()
                 or needle in c.call_id.lower()
                 or needle in c.notes.lower()
+                or needle in (c.page_url or "").lower()
+                or needle in (c.page_title or "").lower()
                 or any(needle in t.lower() for t in c.tags)
             ]
         return items
@@ -318,11 +337,10 @@ def create_app(
         if not fpath.exists():
             raise HTTPException(status_code=404, detail="Audio file not on disk (possibly pruned)")
         media_type = "audio/ogg" if fname.endswith(".opus") else "audio/flac"
-        headers = (
-            {"Content-Disposition": f'attachment; filename="{call_id}-{fname}"'}
-            if download
-            else None
-        )
+        headers = None
+        if download:
+            dl_name = _download_filename(meta, fname)
+            headers = {"Content-Disposition": f'attachment; filename="{dl_name}"'}
         return FileResponse(fpath, media_type=media_type, headers=headers)
 
     @app.get("/api/storage", dependencies=[Depends(require_auth)])

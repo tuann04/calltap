@@ -5,6 +5,7 @@ import {
   ChevronUp,
   Cloud,
   CloudOff,
+  ExternalLink,
   Loader2,
   Pencil,
   Trash2,
@@ -13,6 +14,7 @@ import {
 } from "lucide-react";
 import { api } from "../api";
 import type { CallMetadata } from "../types";
+import { extractHostname, formatCallTitle, formatServiceLabel } from "../utils/callDisplay";
 import { WaveformPlayer } from "./WaveformPlayer";
 
 interface CallCardProps {
@@ -45,11 +47,6 @@ function formatStartedAt(iso: string): string {
     hour: "2-digit",
     minute: "2-digit",
   });
-}
-
-function defaultTitle(call: CallMetadata): string {
-  const svc = call.service.charAt(0).toUpperCase() + call.service.slice(1);
-  return `${svc} Call`;
 }
 
 export const CallCard: React.FC<CallCardProps> = ({
@@ -135,7 +132,9 @@ export const CallCard: React.FC<CallCardProps> = ({
     }
   };
 
-  const displayTitle = call.title.trim() || defaultTitle(call);
+  const displayTitle = formatCallTitle(call);
+  const pageHost = extractHostname(call.page_url);
+  const serviceBadge = formatServiceLabel(call.service, null);
 
   const renderUploadBadge = () => {
     switch (call.upload_status) {
@@ -215,7 +214,7 @@ export const CallCard: React.FC<CallCardProps> = ({
                   type="text"
                   autoFocus
                   value={titleDraft}
-                  placeholder={defaultTitle(call)}
+                  placeholder={displayTitle}
                   onChange={(e) => setTitleDraft(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") {
@@ -275,13 +274,22 @@ export const CallCard: React.FC<CallCardProps> = ({
 
             <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-[var(--ds-fg-muted)]">
               <span className="rounded bg-[var(--ds-muted)] px-1.5 py-0.5 font-mono text-[11px] font-medium text-[var(--ds-fg-secondary)]">
-                {call.service}
+                {serviceBadge}
               </span>
+              {call.page_url && pageHost && (
+                <a
+                  href={call.page_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 font-mono text-[11px] text-[var(--ds-fg-secondary)] hover:text-[var(--ds-fg)] hover:underline"
+                  title={call.page_url}
+                >
+                  <span className="max-w-[180px] truncate">{pageHost}</span>
+                  <ExternalLink className="h-2.5 w-2.5" />
+                </a>
+              )}
               <span>{formatStartedAt(call.started_at)}</span>
               <span className="font-mono tabular-nums">{formatDuration(call.duration_seconds)}</span>
-              <span className="hidden sm:inline font-mono text-[11px] opacity-75">
-                {call.call_id}
-              </span>
               {call.tags.map((tag) => (
                 <span
                   key={tag}
@@ -394,7 +402,10 @@ export const CallCard: React.FC<CallCardProps> = ({
             />
           </div>
 
-          <div className="flex justify-end">
+          <div className="flex items-center justify-between gap-2">
+            <span className="font-mono text-[11px] text-[var(--ds-fg-muted)]">
+              ID: {call.call_id}
+            </span>
             <button
               type="submit"
               disabled={savingDetails}

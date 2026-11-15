@@ -20,6 +20,7 @@ import { CallCard } from "./components/CallCard";
 import { DeleteModal } from "./components/DeleteModal";
 import { StorageModal } from "./components/StorageModal";
 import type { CallMetadata, StatusResponse, StoragePublicView } from "./types";
+import { extractHostname, formatCallTitle, formatServiceLabel } from "./utils/callDisplay";
 
 function formatElapsed(startedAtIso: string): string {
   const start = new Date(startedAtIso).getTime();
@@ -45,7 +46,7 @@ export const App: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  const [serviceChoice, setServiceChoice] = useState("sesame");
+  const [serviceChoice, setServiceChoice] = useState("auto");
   const [newTitle, setNewTitle] = useState("");
   const [starting, setStarting] = useState(false);
   const [stopping, setStopping] = useState(false);
@@ -142,7 +143,7 @@ export const App: React.FC = () => {
     setStarting(true);
     try {
       await api.startCall({
-        service: serviceChoice,
+        service: serviceChoice === "auto" ? null : serviceChoice,
         title: newTitle.trim(),
       });
       setNewTitle("");
@@ -195,9 +196,12 @@ export const App: React.FC = () => {
       if (!q) return true;
       return (
         c.title.toLowerCase().includes(q) ||
+        formatCallTitle(c).toLowerCase().includes(q) ||
         c.service.toLowerCase().includes(q) ||
         c.call_id.toLowerCase().includes(q) ||
         c.notes.toLowerCase().includes(q) ||
+        (c.page_url ?? "").toLowerCase().includes(q) ||
+        (c.page_title ?? "").toLowerCase().includes(q) ||
         c.tags.some((t) => t.toLowerCase().includes(q))
       );
     });
@@ -341,11 +345,14 @@ export const App: React.FC = () => {
               <span className="text-[var(--ds-fg-secondary)]">
                 {status?.pulse_healthy ? "Audio ready" : "Pulse offline"}
               </span>
-              {status?.active_tab?.service && status.active_tab.service !== "unknown" && (
+              {(status?.active_tab?.url ||
+                (status?.active_tab?.service && status.active_tab.service !== "unknown")) && (
                 <>
                   <span className="text-[var(--ds-border-strong)]">/</span>
-                  <span className="font-mono text-[11px] text-[var(--ds-fg)]">
-                    {status.active_tab.service}
+                  <span className="max-w-[140px] truncate font-mono text-[11px] text-[var(--ds-fg)]">
+                    {status.active_tab.service !== "unknown"
+                      ? status.active_tab.service
+                      : extractHostname(status.active_tab.url) ?? "unknown"}
                   </span>
                 </>
               )}
@@ -406,14 +413,14 @@ export const App: React.FC = () => {
                       LIVE RECORDING
                     </span>
                     <span className="rounded bg-[var(--ds-muted)] px-2 py-0.5 font-mono text-xs text-[var(--ds-fg-secondary)]">
-                      {status.active_call.service}
+                      {formatServiceLabel(status.active_call.service, status.active_call.page_url)}
                     </span>
                   </div>
                   <h1 className="text-base font-semibold text-[var(--ds-fg)]">
-                    {status.active_call.title || `${status.active_call.service} session`}
+                    {formatCallTitle(status.active_call)}
                   </h1>
                   <p className="font-mono text-xs text-[var(--ds-fg-muted)]">
-                    {status.active_call.call_id} · Capturing microphone + browser audio
+                    {status.active_call.page_url || "Capturing microphone + browser audio"}
                   </p>
                 </div>
 
@@ -441,7 +448,7 @@ export const App: React.FC = () => {
                 onSubmit={handleStart}
                 className="flex flex-col gap-3 sm:flex-row sm:items-end"
               >
-                <div className="w-full sm:w-44">
+                <div className="w-full sm:w-48">
                   <label className="mb-1.5 block text-xs font-medium text-[var(--ds-fg-secondary)]">
                     Service
                   </label>
@@ -450,6 +457,7 @@ export const App: React.FC = () => {
                     onChange={(e) => setServiceChoice(e.target.value)}
                     className="h-9 w-full rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-3 text-xs font-medium text-[var(--ds-fg)] focus:border-[var(--ds-fg)] focus:outline-none"
                   >
+                    <option value="auto">Auto-detect (from tab)</option>
                     <option value="sesame">Sesame</option>
                     <option value="chatgpt">ChatGPT Voice</option>
                     <option value="gemini">Gemini Live</option>

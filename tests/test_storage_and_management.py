@@ -219,3 +219,71 @@ def test_built_spa_and_assets_served(tmp_path: Path) -> None:
         assert '<div id="root"></div>' in res.text
         assert "/assets/" in res.text
 
+
+def test_unknown_service_preserves_url_and_clean_download_name(tmp_path: Path) -> None:
+    from calltap.cdp import TabContext, classify_service_from_url
+
+    assert classify_service_from_url("https://meet.google.com/abc-def") == "unknown"
+    assert classify_service_from_url(None) == "unknown"
+    assert classify_service_from_url("https://app.sesame.com") == "sesame"
+
+    cfg = Settings(
+        _env_file=None,
+        data_dir=tmp_path,
+        recordings_dir=tmp_path / "calls",
+        db_path=tmp_path / "calltap.db",
+        auto_detect=False,
+    )
+    assert cfg.default_service == "unknown"
+
+    app = create_app(cfg, start_background=False)
+    ctrl = app.state.controller
+    ctrl.pulse.is_healthy = AsyncMock(return_value=True)
+    ctrl.inspector.active_tab = AsyncMock(
+        return_value=TabContext(
+            service="unknown",
+            url="https://meet.google.com/abc-defg-hij",
+            title="Meet - abc-defg-hij",
+        )
+    )
+
+    recording_dir_holder: dict[str, Path] = {}
+
+    async def fake_start(call_dir: Path, **_kwargs) -> None:
+        recording_dir_holder["dir"] = call_dir
+        (call_dir / "you.flac").write_bytes(b"fLaC-you")
+        (call_dir / "agent.flac").write_bytes(b"fLaC-agent")
+        (call_dir / "mix.opus").write_bytes(b"OggS-mix")
+        ctrl.recorder._proc = object()
+
+    async def fake_stop() -> RecordingResult:
+        d = recording_dir_holder["dir"]
+        ctrl.recorder._proc = None
+        return RecordingResult(
+            you_path=d / "you.flac",
+            agent_path=d / "agent.flac",
+            mix_path=d / "mix.opus",
+            exit_code=0,
+            stderr_tail="",
+        )
+
+    ctrl.recorder.start = fake_start  # type: ignore[method-assign]
+    ctrl.recorder.stop = fake_stop  # type: ignore[method-assign]
+    type(ctrl.recorder).is_recording = property(lambda self: self._proc is not None)  # type: ignore[misc]
+
+    with TestClient(app) as client:
+        started = client.post("/api/calls/start").json()
+        assert started["service"] == "unknown"
+        assert started["page_url"] == "https://meet.google.com/abc-defg-hij"
+        cid = started["call_id"]
+        client.post("/api/calls/stop")
+
+        dl_untitled = client.get(f"/api/calls/{cid}/audio/mix", params={"download": "true"})
+        assert dl_untitled.status_code == 200
+        assert "meet.google.com-" in dl_untitled.headers["content-disposition"]
+
+        client.patch(f"/api/calls/{cid}", json={"title": "Weekly Team Sync"})
+        dl_titled = client.get(f"/api/calls/{cid}/audio/mix", params={"download": "true"})
+        assert 'filename="weekly-team-sync-mix.opus"' in dl_titled.headers["content-disposition"]
+
+

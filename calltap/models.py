@@ -39,7 +39,7 @@ class CallFiles(BaseModel):
 class CallMetadata(BaseModel):
     call_id: str
     title: str = ""
-    service: str = "generic"
+    service: str = "unknown"
     trigger: str = "auto"  # "auto" | "manual"
     page_url: str | None = None
     page_title: str | None = None

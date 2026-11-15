@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     stop_grace_seconds: float = 2.5
     poll_interval_seconds: float = 0.5
     auto_detect: bool = True
-    default_service: str = "sesame"
+    default_service: str = "unknown"
 
     cdp_url: str = "http://neko:9222"
 

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { AlertTriangle, Loader2, Trash2, X } from "lucide-react";
 import type { CallMetadata } from "../types";
+import { formatCallTitle } from "../utils/callDisplay";
 
 interface DeleteModalProps {
   targets: CallMetadata[];
@@ -30,7 +31,7 @@ export const DeleteModal: React.FC<DeleteModalProps> = ({
   const hasRemoteCopies = targets.some((c) => Boolean(c.remote_uri));
   const isSingle = targets.length === 1;
   const label = isSingle
-    ? targets[0].title || `${targets[0].service} (${targets[0].call_id})`
+    ? formatCallTitle(targets[0])
     : `${targets.length} selected recordings`;
 
   const handleConfirm = async () => {
