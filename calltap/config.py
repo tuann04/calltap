@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     sample_rate: int = 48000
     create_stereo_mix: bool = True
     stop_grace_seconds: float = 2.5
+    silence_stop_seconds: float = 20.0
+    silence_threshold_db: float = -55.0
+    neko_metrics_url: str = "http://neko:8080/metrics"
+    neko_disconnect_stop_seconds: float = 10.0
     poll_interval_seconds: float = 0.5
     auto_detect: bool = True
     default_service: str = "unknown"

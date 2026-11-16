@@ -3,10 +3,12 @@ import {
   CheckSquare,
   Cloud,
   CloudOff,
+  ExternalLink,
   HardDrive,
   Loader2,
   Mic,
   Moon,
+  Power,
   Radio,
   RefreshCw,
   Search,
@@ -320,6 +322,10 @@ export const App: React.FC = () => {
     remote_label: "Local storage only",
   };
 
+  const vmSleeping = Boolean(status?.vm_sleeping);
+  const wakeUrl = status?.wake_url || "/?wake=1";
+  const nekoUrl = status?.neko_url || null;
+
   const activeTabLabel =
     status?.active_tab?.service && status.active_tab.service !== "unknown"
       ? status.active_tab.service
@@ -339,9 +345,19 @@ export const App: React.FC = () => {
               <span className="truncate text-sm font-semibold tracking-tight">CallTap</span>
               <span
                 className={`h-2 w-2 shrink-0 rounded-full md:hidden ${
-                  status?.pulse_healthy ? "bg-emerald-500" : "bg-red-500"
+                  vmSleeping
+                    ? "bg-sky-400"
+                    : status?.pulse_healthy
+                      ? "bg-emerald-500"
+                      : "bg-red-500"
                 }`}
-                title={status?.pulse_healthy ? "Audio ready" : "Pulse offline"}
+                title={
+                  vmSleeping
+                    ? "Serverless R2 · VM sleeping ($0/hr)"
+                    : status?.pulse_healthy
+                      ? "Audio ready"
+                      : "Pulse offline"
+                }
               />
               <span className="hidden sm:inline-block rounded-full border border-[var(--ds-border)] px-2 py-0.5 font-mono text-[10px] text-[var(--ds-fg-muted)]">
                 dual-track
@@ -354,11 +370,19 @@ export const App: React.FC = () => {
             <div className="hidden md:flex items-center gap-2 rounded-full border border-[var(--ds-border)] bg-[var(--ds-surface)] px-3 py-1 text-xs">
               <span
                 className={`h-2 w-2 rounded-full ${
-                  status?.pulse_healthy ? "bg-emerald-500" : "bg-red-500"
+                  vmSleeping
+                    ? "bg-sky-400"
+                    : status?.pulse_healthy
+                      ? "bg-emerald-500"
+                      : "bg-red-500"
                 }`}
               />
               <span className="text-[var(--ds-fg-secondary)]">
-                {status?.pulse_healthy ? "Audio ready" : "Pulse offline"}
+                {vmSleeping
+                  ? "VM sleeping ($0/hr) · Serverless R2"
+                  : status?.pulse_healthy
+                    ? "Audio ready"
+                    : "Pulse offline"}
               </span>
               {activeTabLabel && (
                 <>
@@ -373,7 +397,7 @@ export const App: React.FC = () => {
             {/* Cloud Storage Connection Pill */}
             <button
               type="button"
-              onClick={() => setStorageModalOpen(true)}
+              onClick={() => !vmSleeping && setStorageModalOpen(true)}
               className={`inline-flex h-9 sm:h-8 items-center gap-1.5 rounded-full border px-2.5 sm:px-3 text-xs font-medium transition cursor-pointer ${
                 cloudConnected
                   ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/15"
@@ -421,10 +445,18 @@ export const App: React.FC = () => {
             <span className="inline-flex items-center gap-1.5 text-[var(--ds-fg-secondary)]">
               <span
                 className={`h-2 w-2 rounded-full ${
-                  status?.pulse_healthy ? "bg-emerald-500" : "bg-red-500"
+                  vmSleeping
+                    ? "bg-sky-400"
+                    : status?.pulse_healthy
+                      ? "bg-emerald-500"
+                      : "bg-red-500"
                 }`}
               />
-              {status?.pulse_healthy ? "Audio ready" : "Pulse offline"}
+              {vmSleeping
+                ? "VM sleeping ($0/hr) · Serverless R2"
+                : status?.pulse_healthy
+                  ? "Audio ready"
+                  : "Pulse offline"}
             </span>
             {activeTabLabel && (
               <span className="max-w-[170px] truncate rounded bg-[var(--ds-muted)] px-2 py-0.5 font-mono text-[11px] text-[var(--ds-fg)]">
@@ -434,7 +466,43 @@ export const App: React.FC = () => {
           </div>
 
           <div className="p-4 sm:p-5">
-            {status?.active_call ? (
+            {vmSleeping ? (
+              <div className="flex flex-col gap-3.5 sm:flex-row sm:items-center sm:justify-between">
+                <div className="min-w-0 space-y-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-sky-500/30 bg-sky-500/10 px-2.5 py-0.5 text-[11px] font-medium text-sky-400">
+                      <span className="h-1.5 w-1.5 rounded-full bg-sky-400" />
+                      SERVERLESS ARCHIVE · $0/HR COMPUTE
+                    </span>
+                  </div>
+                  <h1 className="text-sm sm:text-base font-semibold text-[var(--ds-fg)]">
+                    Recorder VM is deallocated — browsing &amp; playing directly from Cloudflare R2
+                  </h1>
+                  <p className="text-xs text-[var(--ds-fg-muted)]">
+                    Playback, waveform scrubbing, search, notes, tags, and deletion run at the edge with 0s cold start. Wake the VM only when you want to record a live call.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 shrink-0">
+                  {nekoUrl && (
+                    <a
+                      href={nekoUrl}
+                      className="inline-flex h-10 sm:h-9 flex-1 sm:flex-initial items-center justify-center gap-1.5 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-3.5 text-xs font-medium text-[var(--ds-fg)] hover:border-[var(--ds-border-strong)] no-underline"
+                    >
+                      <span>Open Neko</span>
+                      <ExternalLink className="h-3.5 w-3.5 text-[var(--ds-fg-muted)]" />
+                    </a>
+                  )}
+                  <a
+                    href={wakeUrl}
+                    className="inline-flex h-10 sm:h-9 flex-1 sm:flex-initial items-center justify-center gap-1.5 rounded-md bg-[var(--ds-btn-primary-bg)] px-4 text-xs font-semibold text-[var(--ds-btn-primary-fg)] hover:bg-[var(--ds-btn-primary-hover)] no-underline"
+                  >
+                    <Power className="h-3.5 w-3.5" />
+                    <span>Wake VM to Record</span>
+                  </a>
+                </div>
+              </div>
+            ) : status?.active_call ? (
               <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div className="min-w-0 space-y-1">
                   <div className="flex flex-wrap items-center gap-2">
@@ -529,8 +597,9 @@ export const App: React.FC = () => {
               <input
                 type="checkbox"
                 checked={Boolean(status?.auto_detect)}
+                disabled={vmSleeping}
                 onChange={handleToggleAutoDetect}
-                className="h-4 w-4 sm:h-3.5 sm:w-3.5 accent-[var(--ds-fg)] cursor-pointer"
+                className="h-4 w-4 sm:h-3.5 sm:w-3.5 accent-[var(--ds-fg)] cursor-pointer disabled:opacity-50"
               />
               <span className="text-[var(--ds-fg-secondary)]">
                 Auto-detect calls from browser microphone
@@ -539,16 +608,18 @@ export const App: React.FC = () => {
 
             <button
               type="button"
-              onClick={() => setStorageModalOpen(true)}
+              onClick={() => !vmSleeping && setStorageModalOpen(true)}
               className="inline-flex items-center gap-1.5 text-left text-xs text-[var(--ds-fg-secondary)] hover:text-[var(--ds-fg)] cursor-pointer"
             >
               {cloudConnected ? (
                 <>
                   <Cloud className="h-3.5 w-3.5 shrink-0 text-emerald-500" />
                   <span className="truncate">
-                    {storageView.auto_upload
-                      ? `Auto-uploading to ${storageView.remote_label}`
-                      : `Connected (${storageView.remote_label}) — manual`}
+                    {vmSleeping
+                      ? `Serving archive directly from ${storageView.remote_label}`
+                      : storageView.auto_upload
+                        ? `Auto-uploading to ${storageView.remote_label}`
+                        : `Connected (${storageView.remote_label}) — manual`}
                   </span>
                 </>
               ) : (

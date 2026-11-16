@@ -92,10 +92,10 @@ sequenceDiagram
   C->>F: Record audio_input.monitor + audio_output.monitor
   Note over F: Synced you.flac, agent.flac, mix.opus
 
-  B->>PA: Hang up (mic stream closes)
-  M->>C: Mic absent for 2.5s grace period
+  B->>PA: Hang up (mic stream closes, 20s dual-track silence, or 10s Neko viewer disconnect)
+  M->>C: Stop condition met
   C->>F: Send 'q' on stdin (flush headers)
-  C->>C: Write meta.json + mark COMPLETED in SQLite
+  C->>C: Write meta.json + peaks.json + mark COMPLETED in SQLite
   C-->>U: Wake upload loop
 
   U->>U: rclone copy + check (--size-only)
@@ -107,91 +107,60 @@ sequenceDiagram
   end
 ```
 
-## Cloudflare deployment (Azure VM)
+## Deployment (High-Level View)
 
-Public endpoints on `tuann04.cloud`, no VPN or open ports needed on the client: `neko.tuann04.cloud` (remote Chrome), `calltap.tuann04.cloud` (dashboard), and `call.tuann04.cloud` (1-tap wake Worker). Full setup details in [deploy/cloudflare/README.md](deploy/cloudflare/README.md).
+CallTap supports three deployment targets under [`deploy/`](deploy/):
+
+| Target | Entry Point | Notes |
+|---|---|---|
+| **Cloudflare + Azure VM (recommended)** | [`deploy/README.md`](deploy/README.md), [`deploy/cloudflare/README.md`](deploy/cloudflare/README.md) | Zero public IPs, Passkey/OIDC SSO via Cloudflare Access, 1-tap VM wake + 15m auto-sleep (`$0/hr` idle), and serverless dashboard/playback via Worker + KV/R2 while the VM sleeps. |
+| **VPS + Caddy** | [`deploy/vps/Caddyfile`](deploy/vps/Caddyfile) | Reverse proxy for `neko` (`:8080`) and `calltap` (`:8090`) on a standard Linux VPS with public ports `80/443` and `52000/udp+tcp`. |
+| **Homelab + Tailscale Serve** | [`deploy/homelab/tailscale-serve.sh`](deploy/homelab/tailscale-serve.sh) | Exposes Neko (`:443`) and CallTap (`:8443`) privately over Tailscale HTTPS. |
 
 ```mermaid
 flowchart LR
-  subgraph client["iPhone / any browser"]
-    safari["Safari<br/>(no VPN needed)"]
+  subgraph client["Phone / Desktop Browser"]
+    browser["Safari / Chrome<br/>(no VPN needed)"]
   end
 
-  subgraph cf["Cloudflare free tier"]
-    dns["tuann04.cloud DNS"]
-    worker["Worker: calltap-wake<br/>call.tuann04.cloud"]
-    tunnel["Tunnel: calltap<br/>neko + calltap subdomains"]
-    turn["Realtime TURN relay<br/>turn.cloudflare.com"]
+  subgraph cf["Cloudflare Edge (Free Tier)"]
+    access["Cloudflare Access<br/>(Passkeys / OIDC / OTP)"]
+    worker["Worker: calltap-wake<br/>call. + neko/ + calltap/*"]
+    assets["Worker Static Assets + KV/R2<br/>(serverless dashboard & playback)"]
+    tunnel["Tunnel: calltap"]
+    turn["Realtime TURN Relay"]
   end
 
-  subgraph azure["Azure: calltap-vm (east asia)"]
+  subgraph vm["calltap-vm (Azure · No Public IP · Auto-Sleep $0/hr)"]
     direction TB
-    subgraph dockernet["Docker compose network"]
-      neko["neko<br/>remote Chrome :8080"]
-      calltap["calltap<br/>recorder + dashboard :8090"]
-      cfd["cloudflared"]
-    end
-    nsg["NSG: only SSH/22"]
+    neko["neko (:8080)<br/>Chrome + PulseAudio"]
+    calltap["calltap (:8090)<br/>Recorder + API"]
+    cfd["cloudflared"]
+    gltm["Observability (GLTM)<br/>Grafana :3000 · Alloy · Loki · Tempo · Mimir"]
   end
 
-  safari -->|HTTPS| dns
-  dns -->|"call."| worker
-  dns -->|"neko / calltap."| tunnel
-  worker -->|"Azure REST API<br/>start / deallocate"| azure
-  cfd <-->|"outbound QUIC tunnel"| tunnel
+  browser -->|HTTPS| access
+  access --> worker
+  worker -->|"VM sleeping: serve SPA + KV/R2"| assets
+  worker -->|"VM sleeping on neko/ or ?wake=1"| vm
+  access -->|"VM awake"| tunnel
+  cfd <-->|"outbound QUIC"| tunnel
   tunnel --> neko
   tunnel --> calltap
-  safari <-.->|"WebRTC media<br/>direct or relayed"| turn
+  browser <-.->|"WebRTC media"| turn
   turn <-.-> neko
-  nsg -.- dockernet
+  neko -.-> gltm
+  calltap -.-> gltm
 ```
 
-### A call from the iPhone, step by step
+### Observability (GLTM Stack)
 
-```mermaid
-sequenceDiagram
-  autonumber
-  actor U as iPhone (Safari)
-  participant W as Worker<br/>call.tuann04.cloud
-  participant AZ as Azure API
-  participant VM as calltap-vm
-  participant N as neko
-  participant T as TURN relay
+Every Docker Compose deployment runs a built-in **Grafana + Loki + Tempo + Mimir + Alloy** stack ([`deploy/observability/`](deploy/observability/)):
 
-  U->>W: GET call.tuann04.cloud
-  alt VM deallocated
-    W->>AZ: start VM
-    AZ-->>VM: boot (~40s)
-    W-->>U: "Waking CallTap..." page
-    U->>W: auto-refresh
-  end
-  W-->>U: 302 redirect
-  U->>N: HTTPS signaling (via tunnel)
-  N-->>U: SDP offer + TURN credentials
-  U->>T: ICE connectivity check
-  T->>N: relayed media
-  Note over U,N: ICE picks direct if possible,<br/>TURN relay otherwise
-  VM->>VM: CallTap records mic + agent tracks
-  VM->>VM: idle 15 min, no session/upload<br/>-> deallocate
-```
+- **Alloy** collects Docker container JSON logs (-> **Loki**), scrapes host + `neko` + `calltap` Prometheus metrics (-> **Mimir**), and ingests OpenTelemetry traces from `calltap` (`:4318`) (-> **Tempo**).
+- **Grafana** is exposed at `grafana.<domain>` behind Cloudflare Access (Passkeys) with auto-login via `Cf-Access-Authenticated-User-Email` (and also bound to `127.0.0.1:3000` for SSH tunnels), featuring a pre-provisioned **CallTap & Neko** dashboard.
 
-### Cost control (idle = $0/hour)
-
-```mermaid
-flowchart TB
-  subgraph vm["calltap-vm (systemd timers)"]
-    rotate["turn-rotate.timer<br/>daily 03:10 UTC + at boot"]
-    idle["idleness.timer<br/>every 5 min"]
-  end
-
-  rotate -->|"curl POST"| cfturn["Cloudflare TURN API<br/>fresh 24h credentials"]
-  cfturn -->|"write turn.env"| compose["docker compose env<br/>neko picks it up on restart"]
-
-  idle -->|"check sessions +<br/>pending uploads"| state{"active?"}
-  state -->|yes| reset["reset idle counter"]
-  state -->|"no, 15 min"| sleepapi["POST /sleep"]
-  sleepapi --> worker["Worker deallocates VM<br/>$0/hour"]
-```
+For full setup, secret locations, deploy commands, and step-by-step troubleshooting runbooks, see **[`deploy/README.md`](deploy/README.md)**.
 
 ## Quick start
 
@@ -210,6 +179,7 @@ Open the CallTap dashboard, click **Local Only** in the top bar whenever you wan
 uv venv --python 3.13 .venv
 uv pip install --python .venv/bin/python -e ".[dev]"
 .venv/bin/pytest
+.venv/bin/ruff check calltap tests
 
 # Frontend (React + Tailwind + Vercel Geist)
 cd web

@@ -13,6 +13,7 @@ from calltap.db import CallDB
 from calltap.models import CallMetadata, UploadStatus
 from calltap.storage import RcloneTarget, StorageManager
 from calltap.telemetry import UPLOAD_DURATION, UPLOADS_TOTAL, start_span
+from calltap.waveform import ensure_call_waveform
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +91,29 @@ class CloudUploader:
         rc, out = await self._run_rclone("purge", remote_uri, target=target)
         return rc == 0, out.strip()
 
+    async def sync_meta_file(self, meta: CallMetadata) -> bool:
+        """Push updated meta.json to remote storage when a call is edited after upload."""
+        target = self._target()
+        if target is None or meta.upload_status != UploadStatus.UPLOADED:
+            return False
+        call_dir = self.settings.recordings_dir / meta.local_rel_dir
+        meta_path = call_dir / "meta.json"
+        if not meta_path.exists():
+            return False
+        remote_uri = meta.remote_uri or build_remote_uri(
+            target.remote,
+            target.prefix,
+            meta.local_rel_dir,
+        )
+        rc, _ = await self._run_rclone(
+            "copyto",
+            str(meta_path),
+            f"{remote_uri.rstrip('/')}/meta.json",
+            "--retries=2",
+            target=target,
+        )
+        return rc == 0
+
     async def _notify(self, meta: CallMetadata) -> None:
         url = self.settings.ntfy_url.strip()
         if not url:
@@ -142,8 +166,24 @@ class CloudUploader:
                 meta.call_id, UploadStatus.UPLOADING, attempts=attempts, error=None
             )
 
-            # Ensure meta.json on disk is fresh before copying.
-            write_meta_file(call_dir, meta)
+            # Ensure peaks.json waveform exists before rclone copies the directory to R2.
+            try:
+                await ensure_call_waveform(call_dir, meta)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Pre-upload waveform generation skipped for %s: %s", meta.call_id, exc)
+
+            # Write meta.json with UPLOADED status before rclone copy so R2 has the final metadata.
+            now = datetime.now(UTC)
+            remote_meta = meta.model_copy(
+                update={
+                    "upload_status": UploadStatus.UPLOADED,
+                    "upload_attempts": attempts,
+                    "upload_error": None,
+                    "remote_uri": remote_uri,
+                    "uploaded_at": now,
+                }
+            )
+            write_meta_file(call_dir, remote_meta)
 
             rc, out = await self._run_rclone(
                 "copy",
@@ -169,7 +209,6 @@ class CloudUploader:
             UPLOAD_DURATION.observe(max(0.0, time.perf_counter() - started))
 
             if rc == 0:
-                now = datetime.now(UTC)
                 updated = self.db.update_upload_state(
                     meta.call_id,
                     UploadStatus.UPLOADED,
@@ -200,6 +239,8 @@ class CloudUploader:
                 error=err_msg,
                 next_retry_at=retry_at,
             )
+            if updated:
+                write_meta_file(call_dir, updated)
             UPLOADS_TOTAL.labels(status=UploadStatus.FAILED.value).inc()
             logger.warning(
                 "Upload failed for call %s (attempt %d): %s",

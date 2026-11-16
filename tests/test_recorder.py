@@ -48,3 +48,26 @@ async def test_dual_track_recorder_lavfi_end_to_end(tmp_path: Path) -> None:
     assert result.agent_path.exists() and result.agent_path.stat().st_size > 1000
     assert result.mix_path is not None
     assert result.mix_path.exists() and result.mix_path.stat().st_size > 500
+    assert rec.silent_for_seconds == 0.0
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
+async def test_dual_track_recorder_detects_silence_in_realtime(tmp_path: Path) -> None:
+    rec = DualTrackRecorder(
+        pulse_server="",
+        user_source="audio_input.monitor",
+        agent_source="audio_output.monitor",
+        sample_rate=48000,
+        create_stereo_mix=True,
+    )
+    call_dir = tmp_path / "call-silent"
+    await rec.start(
+        call_dir,
+        input_format="lavfi",
+        user_source_override="anullsrc=r=48000:cl=stereo",
+        agent_source_override="anullsrc=r=48000:cl=stereo",
+    )
+    await asyncio.sleep(1.8)
+    assert rec.silent_for_seconds > 0.2
+    await rec.stop()
+    assert rec.silent_for_seconds == 0.0

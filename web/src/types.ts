@@ -77,6 +77,9 @@ export interface StatusResponse {
     url: string | null;
     title: string | null;
   };
+  vm_sleeping?: boolean;
+  wake_url?: string | null;
+  neko_url?: string | null;
 }
 
 export interface WaveformResponse {

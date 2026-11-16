@@ -1,10 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
+import re
 import signal
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
+
+_SILENCE_START_RE = re.compile(r"silence_start:\s*([0-9.+-eE]+)")
+_SILENCE_END_RE = re.compile(r"silence_end:\s*([0-9.+-eE]+)")
 
 
 @dataclass(frozen=True)
@@ -26,9 +32,16 @@ def build_ffmpeg_command(
     sample_rate: int = 48000,
     input_format: str = "pulse",
     extra_global_args: list[str] | None = None,
+    silence_threshold_db: float = -55.0,
+    enable_silence_detect: bool = True,
 ) -> list[str]:
     """Build a single-process ffmpeg command recording user + agent into synced separate files."""
-    cmd = ["ffmpeg", "-hide_banner", "-loglevel", "warning", "-y"]
+    cmd = ["ffmpeg", "-hide_banner"]
+    if enable_silence_detect:
+        cmd.extend(["-loglevel", "info", "-nostats"])
+    else:
+        cmd.extend(["-loglevel", "warning"])
+    cmd.append("-y")
     if extra_global_args:
         cmd.extend(extra_global_args)
 
@@ -62,13 +75,26 @@ def build_ffmpeg_command(
         cmd.extend(["-f", input_format, "-i", user_source, "-f", input_format, "-i", agent_source])
 
     if mix_path is not None:
-        filter_complex = (
-            f"[0:a]aresample={sample_rate}:async=1:first_pts=0,"
-            f"pan=mono|c0=0.5*c0+0.5*c1,asplit=2[you_f][you_m];"
-            f"[1:a]aresample={sample_rate}:async=1:first_pts=0,"
-            f"pan=mono|c0=0.5*c0+0.5*c1,asplit=2[agent_f][agent_m];"
-            f"[you_m][agent_m]amerge=inputs=2[mix]"
-        )
+        if enable_silence_detect:
+            filter_complex = (
+                f"[0:a]aresample={sample_rate}:async=1:first_pts=0,"
+                f"pan=mono|c0=0.5*c0+0.5*c1,asplit=2[you_f][you_m];"
+                f"[1:a]aresample={sample_rate}:async=1:first_pts=0,"
+                f"pan=mono|c0=0.5*c0+0.5*c1,asplit=2[agent_f][agent_m];"
+                f"[you_m][agent_m]amerge=inputs=2[mix];"
+                f"[mix]asplit=2[mix_out][sil_in];"
+                f"[sil_in]silencedetect=n={silence_threshold_db:.1f}dB:d=1[sil_out]"
+            )
+            mix_map = "[mix_out]"
+        else:
+            filter_complex = (
+                f"[0:a]aresample={sample_rate}:async=1:first_pts=0,"
+                f"pan=mono|c0=0.5*c0+0.5*c1,asplit=2[you_f][you_m];"
+                f"[1:a]aresample={sample_rate}:async=1:first_pts=0,"
+                f"pan=mono|c0=0.5*c0+0.5*c1,asplit=2[agent_f][agent_m];"
+                f"[you_m][agent_m]amerge=inputs=2[mix]"
+            )
+            mix_map = "[mix]"
         cmd.extend(
             [
                 "-filter_complex",
@@ -88,7 +114,7 @@ def build_ffmpeg_command(
                 "5",
                 str(agent_path),
                 "-map",
-                "[mix]",
+                mix_map,
                 "-c:a",
                 "libopus",
                 "-b:a",
@@ -96,13 +122,25 @@ def build_ffmpeg_command(
                 str(mix_path),
             ]
         )
+        if enable_silence_detect:
+            cmd.extend(["-map", "[sil_out]", "-f", "null", "-"])
     else:
-        filter_complex = (
-            f"[0:a]aresample={sample_rate}:async=1:first_pts=0,"
-            f"pan=mono|c0=0.5*c0+0.5*c1[you_f];"
-            f"[1:a]aresample={sample_rate}:async=1:first_pts=0,"
-            f"pan=mono|c0=0.5*c0+0.5*c1[agent_f]"
-        )
+        if enable_silence_detect:
+            filter_complex = (
+                f"[0:a]aresample={sample_rate}:async=1:first_pts=0,"
+                f"pan=mono|c0=0.5*c0+0.5*c1,asplit=2[you_f][you_m];"
+                f"[1:a]aresample={sample_rate}:async=1:first_pts=0,"
+                f"pan=mono|c0=0.5*c0+0.5*c1,asplit=2[agent_f][agent_m];"
+                f"[you_m][agent_m]amerge=inputs=2,"
+                f"silencedetect=n={silence_threshold_db:.1f}dB:d=1[sil_out]"
+            )
+        else:
+            filter_complex = (
+                f"[0:a]aresample={sample_rate}:async=1:first_pts=0,"
+                f"pan=mono|c0=0.5*c0+0.5*c1[you_f];"
+                f"[1:a]aresample={sample_rate}:async=1:first_pts=0,"
+                f"pan=mono|c0=0.5*c0+0.5*c1[agent_f]"
+            )
         cmd.extend(
             [
                 "-filter_complex",
@@ -123,6 +161,8 @@ def build_ffmpeg_command(
                 str(agent_path),
             ]
         )
+        if enable_silence_detect:
+            cmd.extend(["-map", "[sil_out]", "-f", "null", "-"])
     return cmd
 
 
@@ -137,21 +177,54 @@ class DualTrackRecorder:
         agent_source: str,
         sample_rate: int = 48000,
         create_stereo_mix: bool = True,
+        silence_threshold_db: float = -55.0,
     ) -> None:
         self.pulse_server = pulse_server
         self.user_source = user_source
         self.agent_source = agent_source
         self.sample_rate = sample_rate
         self.create_stereo_mix = create_stereo_mix
+        self.silence_threshold_db = silence_threshold_db
 
         self._proc: asyncio.subprocess.Process | None = None
         self._you_path: Path | None = None
         self._agent_path: Path | None = None
         self._mix_path: Path | None = None
+        self._stderr_task: asyncio.Task[None] | None = None
+        self._stderr_lines: deque[str] = deque(maxlen=40)
+        self._silence_started_at: float | None = None
 
     @property
     def is_recording(self) -> bool:
         return self._proc is not None and self._proc.returncode is None
+
+    @property
+    def silent_for_seconds(self) -> float:
+        if not self.is_recording or self._silence_started_at is None:
+            return 0.0
+        try:
+            loop = asyncio.get_running_loop()
+            return max(0.0, loop.time() - self._silence_started_at)
+        except RuntimeError:
+            return 0.0
+
+    async def _consume_stderr(self, proc: asyncio.subprocess.Process) -> None:
+        if proc.stderr is None:
+            return
+        loop = asyncio.get_running_loop()
+        while True:
+            line = await proc.stderr.readline()
+            if not line:
+                break
+            text = line.decode(errors="replace").rstrip()
+            if not text:
+                continue
+            self._stderr_lines.append(text)
+            if _SILENCE_START_RE.search(text):
+                if self._silence_started_at is None:
+                    self._silence_started_at = loop.time()
+            elif _SILENCE_END_RE.search(text):
+                self._silence_started_at = None
 
     async def start(
         self,
@@ -169,6 +242,8 @@ class DualTrackRecorder:
         self._you_path = call_dir / "you.flac"
         self._agent_path = call_dir / "agent.flac"
         self._mix_path = (call_dir / "mix.opus") if self.create_stereo_mix else None
+        self._stderr_lines.clear()
+        self._silence_started_at = None
 
         cmd = build_ffmpeg_command(
             user_source=user_source_override or self.user_source,
@@ -179,6 +254,7 @@ class DualTrackRecorder:
             sample_rate=self.sample_rate,
             input_format=input_format,
             extra_global_args=extra_global_args,
+            silence_threshold_db=self.silence_threshold_db,
         )
 
         env = os.environ.copy()
@@ -192,13 +268,15 @@ class DualTrackRecorder:
             stderr=asyncio.subprocess.PIPE,
             env=env,
         )
+        self._stderr_task = asyncio.create_task(
+            self._consume_stderr(self._proc), name="calltap-ffmpeg-stderr"
+        )
 
     async def stop(self, timeout: float = 8.0) -> RecordingResult:
         if self._proc is None or self._you_path is None or self._agent_path is None:
             raise RuntimeError("Recorder is not running")
 
         proc = self._proc
-        stderr_data = b""
 
         if proc.returncode is None:
             # Sending 'q' on stdin lets ffmpeg flush FLAC/Opus headers cleanly.
@@ -211,24 +289,28 @@ class DualTrackRecorder:
                 pass
 
             try:
-                _, stderr_data = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+                await asyncio.wait_for(proc.wait(), timeout=timeout)
             except TimeoutError:
                 proc.send_signal(signal.SIGINT)
                 try:
-                    _, stderr_data = await asyncio.wait_for(proc.communicate(), timeout=3.0)
+                    await asyncio.wait_for(proc.wait(), timeout=3.0)
                 except TimeoutError:
                     proc.kill()
-                    _, stderr_data = await proc.communicate()
-        else:
-            if proc.stderr is not None:
-                stderr_data = await proc.stderr.read()
+                    await proc.wait()
 
+        if self._stderr_task is not None:
+            with contextlib.suppress(asyncio.CancelledError):
+                await asyncio.wait_for(self._stderr_task, timeout=2.0)
+            self._stderr_task = None
+
+        stderr_tail = "\n".join(self._stderr_lines)[-1000:]
         result = RecordingResult(
             you_path=self._you_path,
             agent_path=self._agent_path,
             mix_path=self._mix_path,
             exit_code=proc.returncode or 0,
-            stderr_tail=stderr_data.decode(errors="replace")[-1000:],
+            stderr_tail=stderr_tail,
         )
         self._proc = None
+        self._silence_started_at = None
         return result

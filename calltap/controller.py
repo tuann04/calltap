@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import secrets
 import shutil
 from datetime import UTC, datetime
 from pathlib import Path
+
+import httpx
 
 from calltap.cdp import ChromeInspector
 from calltap.config import Settings
@@ -59,6 +62,11 @@ class CallController:
         self._upload_wake = asyncio.Event()
         self._active_meta: CallMetadata | None = None
         self._mic_lost_at: float | None = None
+        self._neko_idle_since: float | None = None
+        self._last_capture_index: int | None = None
+        self._suppressed_capture_index: int | None = None
+        self._suppressed_reason: str | None = None
+        self._last_audio_probe_at: float = 0.0
         self.auto_detect: bool = settings.auto_detect
         self._stop_event = asyncio.Event()
         self._tasks: list[asyncio.Task[None]] = []
@@ -221,6 +229,10 @@ class CallController:
 
                 self._active_meta = None
                 self._mic_lost_at = None
+                self._neko_idle_since = None
+                if reason != "auto" and self._last_capture_index is not None:
+                    self._suppressed_capture_index = self._last_capture_index
+                    self._suppressed_reason = reason
                 self._upload_wake.set()
 
                 CALLS_ACTIVE.set(0)
@@ -317,28 +329,109 @@ class CallController:
             deleted_ids.append(meta.call_id)
         return deleted_ids
 
+    async def _neko_has_active_listeners(self) -> bool | None:
+        url = self.settings.neko_metrics_url.strip()
+        if not url:
+            return None
+        try:
+            async with httpx.AsyncClient(timeout=1.0) as client:
+                resp = await client.get(url)
+                resp.raise_for_status()
+                body = resp.text
+        except (httpx.HTTPError, ValueError):
+            return None
+
+        seen = False
+        active = 0.0
+        for line in body.splitlines():
+            m = re.match(
+                r"^(?:neko_capture_streamsink_listeners|neko_webrtc_video_listeners)"
+                r"(?:\{[^}]*\})?\s+([0-9.eE+-]+)\s*$",
+                line,
+            )
+            if not m:
+                continue
+            seen = True
+            try:
+                active += float(m.group(1))
+            except ValueError:
+                pass
+        if not seen:
+            return None
+        return active > 0
+
+    async def _monitor_once(self, now_mono: float | None = None) -> None:
+        if not self.auto_detect:
+            return
+        if now_mono is None:
+            now_mono = asyncio.get_running_loop().time()
+
+        capture = await self.pulse.active_browser_capture()
+        PULSE_HEALTHY.set(1)
+        if capture is not None:
+            self._mic_lost_at = None
+            self._last_capture_index = capture.index
+
+            if not self.recorder.is_recording:
+                if self._suppressed_capture_index is not None:
+                    if capture.index != self._suppressed_capture_index:
+                        self._suppressed_capture_index = None
+                        self._suppressed_reason = None
+                    elif (
+                        self._suppressed_reason != "manual"
+                        and now_mono - self._last_audio_probe_at >= 2.0
+                    ):
+                        self._last_audio_probe_at = now_mono
+                        if await self.pulse.sources_have_audio(
+                            [self.settings.agent_source, self.settings.user_source]
+                        ):
+                            neko_active = await self._neko_has_active_listeners()
+                            if neko_active is not False:
+                                self._suppressed_capture_index = None
+                                self._suppressed_reason = None
+                if self._suppressed_capture_index is None:
+                    await self.start_call(trigger="auto")
+            elif self._active_meta is not None and self._active_meta.trigger == "auto":
+                silent_for = float(getattr(self.recorder, "silent_for_seconds", 0.0))
+                if (
+                    self.settings.silence_stop_seconds > 0
+                    and silent_for >= self.settings.silence_stop_seconds
+                ):
+                    await self.stop_call(reason="auto-silence")
+                    return
+
+                if self.settings.neko_disconnect_stop_seconds > 0:
+                    neko_active = await self._neko_has_active_listeners()
+                    if neko_active is False:
+                        if self._neko_idle_since is None:
+                            self._neko_idle_since = now_mono
+                        elif (
+                            now_mono - self._neko_idle_since
+                            >= self.settings.neko_disconnect_stop_seconds
+                        ):
+                            await self.stop_call(reason="auto-neko-idle")
+                            return
+                    elif neko_active is True:
+                        self._neko_idle_since = None
+        else:
+            self._last_capture_index = None
+            self._suppressed_capture_index = None
+            self._suppressed_reason = None
+            self._neko_idle_since = None
+            if (
+                self.recorder.is_recording
+                and self._active_meta is not None
+                and self._active_meta.trigger == "auto"
+            ):
+                if self._mic_lost_at is None:
+                    self._mic_lost_at = now_mono
+                elif now_mono - self._mic_lost_at >= self.settings.stop_grace_seconds:
+                    await self.stop_call(reason="auto")
+
     async def _monitor_loop(self) -> None:
-        loop = asyncio.get_running_loop()
         while not self._stop_event.is_set():
             try:
-                if self.auto_detect:
-                    capture = await self.pulse.active_browser_capture()
-                    PULSE_HEALTHY.set(1)
-                    if capture is not None:
-                        self._mic_lost_at = None
-                        if not self.recorder.is_recording:
-                            await self.start_call(trigger="auto")
-                    else:
-                        if (
-                            self.recorder.is_recording
-                            and self._active_meta is not None
-                            and self._active_meta.trigger == "auto"
-                        ):
-                            now_mono = loop.time()
-                            if self._mic_lost_at is None:
-                                self._mic_lost_at = now_mono
-                            elif now_mono - self._mic_lost_at >= self.settings.stop_grace_seconds:
-                                await self.stop_call(reason="auto")
+                await self._monitor_once()
             except asyncio.CancelledError:
                 raise
             except (OSError, RuntimeError) as exc:

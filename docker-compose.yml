@@ -158,8 +158,14 @@ services:
       - mimir
     environment:
       GOMEMLIMIT: "240MiB"
+      GF_SERVER_ROOT_URL: "${GRAFANA_ROOT_URL:-https://grafana.tuann04.cloud}"
       GF_SECURITY_ADMIN_USER: "${GRAFANA_ADMIN_USER:-admin}"
       GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:-calltap-grafana}"
+      GF_AUTH_PROXY_ENABLED: "${GRAFANA_AUTH_PROXY_ENABLED:-true}"
+      GF_AUTH_PROXY_HEADER_NAME: "Cf-Access-Authenticated-User-Email"
+      GF_AUTH_PROXY_HEADER_PROPERTY: "email"
+      GF_AUTH_PROXY_AUTO_SIGN_UP: "true"
+      GF_USERS_AUTO_ASSIGN_ORG_ROLE: "Admin"
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_ANALYTICS_REPORTING_ENABLED: "false"
       GF_ANALYTICS_CHECK_FOR_UPDATES: "false"

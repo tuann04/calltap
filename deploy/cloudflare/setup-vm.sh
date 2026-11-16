@@ -34,12 +34,24 @@ install -m 644 "$REPO_DIR/deploy/cloudflare/idleness.timer" /etc/systemd/system/
 
 echo "== 4. idle config"
 if [ ! -s /etc/calltap/idle.env ]; then
+  if [ -z "${WAKE_WORKER_URL:-}" ]; then
+    echo "Wake worker URL (e.g. https://call.example.com):"
+    read -r WAKE_WORKER_URL
+  fi
+  if [ -z "${SLEEP_SECRET:-}" ]; then
+    echo "Paste SLEEP_SECRET (must match calltap-wake Worker secret):"
+    read -rs SLEEP_SECRET
+    echo ""
+  fi
   cat > /etc/calltap/idle.env <<EOF
 IDLE_MINUTES=15
 IDLE_CHECK_MINUTES=5
-NEKO_HOST=http://neko:8080
-WAKE_WORKER_URL=https://call.tuann04.cloud
+NEKO_HOST=http://127.0.0.1:8080
+CALLTAP_HOST=http://127.0.0.1:8090
+WAKE_WORKER_URL=${WAKE_WORKER_URL}
+SLEEP_SECRET=${SLEEP_SECRET}
 EOF
+  chmod 600 /etc/calltap/idle.env
 fi
 
 echo "== 5. boot without network wait deadlock"
@@ -55,6 +67,6 @@ systemctl start turn-rotate.service
 
 echo "== 6. start cloudflared container"
 cd "$REPO_DIR"
-CLOUDFLARED_TOKEN="$(cat "$TOKEN_FILE") docker compose up -d cloudflared"
+CLOUDFLARED_TOKEN="$(cat "$TOKEN_FILE")" docker compose up -d cloudflared
 docker compose ps cloudflared
 echo "done; check: docker logs calltap-cloudflared-1"

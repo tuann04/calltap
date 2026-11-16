@@ -80,8 +80,10 @@ export const WaveformPlayer: React.FC<WaveformPlayerProps> = ({ call }) => {
     return () => obs.disconnect();
   }, []);
 
+  const isUnplayablePruned = call.local_pruned && call.upload_status !== "uploaded";
+
   useEffect(() => {
-    if (!isVisible || call.status !== "completed" || call.local_pruned) return;
+    if (!isVisible || call.status !== "completed" || isUnplayablePruned) return;
     let cancelled = false;
     setLoadingWave(true);
     setWaveformError(null);
@@ -103,7 +105,7 @@ export const WaveformPlayer: React.FC<WaveformPlayerProps> = ({ call }) => {
     return () => {
       cancelled = true;
     };
-  }, [isVisible, call.call_id, call.status, call.local_pruned]);
+  }, [isVisible, call.call_id, call.status, isUnplayablePruned]);
 
   const audioSrc = `/api/calls/${encodeURIComponent(call.call_id)}/audio/${track}`;
 
@@ -203,7 +205,7 @@ export const WaveformPlayer: React.FC<WaveformPlayerProps> = ({ call }) => {
     );
   }
 
-  if (call.local_pruned) {
+  if (isUnplayablePruned) {
     return (
       <div
         ref={containerRef}

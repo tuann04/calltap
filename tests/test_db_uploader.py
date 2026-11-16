@@ -58,23 +58,41 @@ async def test_uploader_success_and_retention_prune(tmp_path: Path) -> None:
         (call_dir / fn).write_bytes(b"audio")
     db.upsert_call(meta)
 
+    observed_meta_during_rclone: dict[str, object] = {}
+
+    async def fake_rclone(*args: object, **kwargs: object) -> tuple[int, str]:
+        import json
+
+        if not observed_meta_during_rclone:
+            observed_meta_during_rclone.update(json.loads((call_dir / "meta.json").read_text()))
+        return (0, "")
+
     uploader = CloudUploader(cfg, db)
-    uploader._run_rclone = AsyncMock(return_value=(0, ""))  # type: ignore[method-assign]
+    uploader._run_rclone = AsyncMock(side_effect=fake_rclone)  # type: ignore[method-assign]
 
     processed = await uploader.process_pending_once()
     assert processed == 1
 
+    expected_uri = build_remote_uri("r2:calltap-test", "calls", meta.local_rel_dir)
+    assert observed_meta_during_rclone.get("upload_status") == "uploaded"
+    assert observed_meta_during_rclone.get("remote_uri") == expected_uri
+
     updated = db.get_call("c-old")
     assert updated is not None
     assert updated.upload_status == UploadStatus.UPLOADED
-    assert updated.remote_uri == build_remote_uri("r2:calltap-test", "calls", meta.local_rel_dir)
+    assert updated.remote_uri == expected_uri
     assert updated.local_pruned is True
     assert not (call_dir / "you.flac").exists()
     assert (call_dir / "meta.json").exists()
+
+    synced = await uploader.sync_meta_file(updated)
+    assert synced is True
     db.close()
 
 
 async def test_uploader_failure_schedules_backoff(tmp_path: Path) -> None:
+    import json
+
     cfg = Settings(
         data_dir=tmp_path,
         recordings_dir=tmp_path / "calls",
@@ -97,8 +115,13 @@ async def test_uploader_failure_schedules_backoff(tmp_path: Path) -> None:
     updated = db.get_call("c-fail")
     assert updated is not None
     assert updated.upload_status == UploadStatus.FAILED
+    assert updated.remote_uri is None
     assert updated.upload_attempts == 1
     assert "network timeout" in (updated.upload_error or "")
+    disk_meta = json.loads((call_dir / "meta.json").read_text())
+    assert disk_meta["upload_status"] == "failed"
+    assert disk_meta["remote_uri"] is None
     # Next retry is in the future, so next_pending_upload() returns None right now.
     assert db.next_pending_upload() is None
     db.close()
+

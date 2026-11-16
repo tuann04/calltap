@@ -137,6 +137,7 @@ def create_app(
         agent_source=cfg.agent_source,
         sample_rate=cfg.sample_rate,
         create_stereo_mix=cfg.create_stereo_mix,
+        silence_threshold_db=cfg.silence_threshold_db,
     )
     uploader = CloudUploader(cfg, db, storage=storage)
     inspector = ChromeInspector(cfg.cdp_url, default_service=cfg.default_service)
@@ -368,6 +369,8 @@ def create_app(
         call_dir = cfg.recordings_dir / meta.local_rel_dir
         if call_dir.exists():
             write_meta_file(call_dir, meta)
+        if meta.upload_status == UploadStatus.UPLOADED and uploader.enabled:
+            await uploader.sync_meta_file(meta)
         return meta
 
     @app.delete("/api/calls/{call_id}", dependencies=[Depends(require_auth)])

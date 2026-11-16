@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import re
+from array import array
 from dataclasses import dataclass
 
 
@@ -162,3 +164,76 @@ class PulseMonitor:
             return True
         except (RuntimeError, OSError, TimeoutError):
             return False
+
+    async def source_has_audio(
+        self,
+        source_name: str,
+        *,
+        duration_seconds: float = 0.15,
+        peak_threshold: int = 120,
+    ) -> bool:
+        """Sample a brief PCM window from a PulseAudio source and return True if audio is above threshold."""
+        if not source_name:
+            return False
+        target_bytes = max(320, int(8000 * 2 * duration_seconds))
+        proc: asyncio.subprocess.Process | None = None
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "parec",
+                f"--device={source_name}",
+                "--rate=8000",
+                "--channels=1",
+                "--format=s16le",
+                "--latency-msec=50",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+                env=self._env(),
+            )
+            assert proc.stdout is not None
+            buf = bytearray()
+            deadline = asyncio.get_running_loop().time() + duration_seconds + 0.35
+            while len(buf) < target_bytes:
+                remaining = deadline - asyncio.get_running_loop().time()
+                if remaining <= 0:
+                    break
+                chunk = await asyncio.wait_for(
+                    proc.stdout.read(target_bytes - len(buf)),
+                    timeout=remaining,
+                )
+                if not chunk:
+                    break
+                buf.extend(chunk)
+        except (OSError, TimeoutError):
+            return False
+        finally:
+            if proc is not None and proc.returncode is None:
+                with contextlib.suppress(ProcessLookupError):
+                    proc.terminate()
+                with contextlib.suppress(TimeoutError, ProcessLookupError):
+                    await asyncio.wait_for(proc.wait(), timeout=0.5)
+
+        usable = len(buf) - (len(buf) % 2)
+        if usable <= 0:
+            return False
+        samples = array("h")
+        samples.frombytes(bytes(buf[:usable]))
+        peak = max((abs(s) for s in samples), default=0)
+        return peak >= peak_threshold
+
+    async def sources_have_audio(
+        self,
+        source_names: list[str],
+        *,
+        duration_seconds: float = 0.15,
+        peak_threshold: int = 120,
+    ) -> bool:
+        results = await asyncio.gather(
+            *(
+                self.source_has_audio(
+                    name, duration_seconds=duration_seconds, peak_threshold=peak_threshold
+                )
+                for name in source_names
+                if name
+            )
+        )
+        return any(results)

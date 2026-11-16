@@ -33,29 +33,32 @@ def test_app_dashboard_and_call_lifecycle(tmp_path: Path) -> None:
         return_value=TabContext(service="sesame", url="https://app.sesame.com", title="Sesame")
     )
 
-    recording_dir_holder: dict[str, Path] = {}
+    class _FakeAppRecorder:
+        def __init__(self) -> None:
+            self.is_recording = False
+            self.silent_for_seconds = 0.0
+            self._dir: Path | None = None
 
-    async def fake_start(call_dir: Path, **_kwargs) -> None:
-        recording_dir_holder["dir"] = call_dir
-        (call_dir / "you.flac").write_bytes(b"fLaC-you")
-        (call_dir / "agent.flac").write_bytes(b"fLaC-agent")
-        (call_dir / "mix.opus").write_bytes(b"OggS-mix")
-        ctrl.recorder._proc = object()  # mark active
+        async def start(self, call_dir: Path, **_kwargs) -> None:
+            self._dir = call_dir
+            (call_dir / "you.flac").write_bytes(b"fLaC-you")
+            (call_dir / "agent.flac").write_bytes(b"fLaC-agent")
+            (call_dir / "mix.opus").write_bytes(b"OggS-mix")
+            self.is_recording = True
 
-    async def fake_stop() -> RecordingResult:
-        d = recording_dir_holder["dir"]
-        ctrl.recorder._proc = None
-        return RecordingResult(
-            you_path=d / "you.flac",
-            agent_path=d / "agent.flac",
-            mix_path=d / "mix.opus",
-            exit_code=0,
-            stderr_tail="",
-        )
+        async def stop(self) -> RecordingResult:
+            assert self._dir is not None
+            d = self._dir
+            self.is_recording = False
+            return RecordingResult(
+                you_path=d / "you.flac",
+                agent_path=d / "agent.flac",
+                mix_path=d / "mix.opus",
+                exit_code=0,
+                stderr_tail="",
+            )
 
-    ctrl.recorder.start = fake_start  # type: ignore[method-assign]
-    ctrl.recorder.stop = fake_stop  # type: ignore[method-assign]
-    type(ctrl.recorder).is_recording = property(lambda self: self._proc is not None)  # type: ignore[misc]
+    ctrl.recorder = _FakeAppRecorder()  # type: ignore[assignment]
 
     with TestClient(app) as client:
         # Unauthenticated request fails when dashboard_user is configured
@@ -103,11 +106,11 @@ def test_cf_access_jwt_auth_and_fallback(tmp_path: Path) -> None:
     jwk_dict["alg"] = "RS256"
 
     aud = "test-aud-123"
-    team = "tuann04"
+    team = "example-team"
     verifier = CloudflareAccessVerifier(
         team=team,
         audience=aud,
-        allowed_emails={"voanhtuan2004@gmail.com"},
+        allowed_emails={"owner@example.com"},
         jwks_override={"keys": [jwk_dict]},
     )
 
@@ -120,7 +123,7 @@ def test_cf_access_jwt_auth_and_fallback(tmp_path: Path) -> None:
         dashboard_pass="secret",
         cf_access_team=team,
         cf_access_aud=aud,
-        cf_access_allowed_emails="Voanhtuan2004@gmail.com",
+        cf_access_allowed_emails="Owner@example.com",
     )
     app = create_app(cfg, start_background=False, cf_verifier=verifier)
 
@@ -128,8 +131,8 @@ def test_cf_access_jwt_auth_and_fallback(tmp_path: Path) -> None:
     valid_token = jwt.encode(
         {
             "aud": [aud],
-            "iss": "https://tuann04.cloudflareaccess.com",
-            "email": "Voanhtuan2004@gmail.com",
+            "iss": "https://example-team.cloudflareaccess.com",
+            "email": "Owner@example.com",
             "exp": int((now + timedelta(minutes=10)).timestamp()),
             "iat": int(now.timestamp()),
         },
@@ -140,7 +143,7 @@ def test_cf_access_jwt_auth_and_fallback(tmp_path: Path) -> None:
     wrong_email_token = jwt.encode(
         {
             "aud": [aud],
-            "iss": "https://tuann04.cloudflareaccess.com",
+            "iss": "https://example-team.cloudflareaccess.com",
             "email": "other@example.com",
             "exp": int((now + timedelta(minutes=10)).timestamp()),
             "iat": int(now.timestamp()),
@@ -166,8 +169,8 @@ def test_cf_access_jwt_auth_and_fallback(tmp_path: Path) -> None:
         bad_aud_token = jwt.encode(
             {
                 "aud": ["other-aud"],
-                "iss": "https://tuann04.cloudflareaccess.com",
-                "email": "Voanhtuan2004@gmail.com",
+                "iss": "https://example-team.cloudflareaccess.com",
+                "email": "Owner@example.com",
                 "exp": int((now + timedelta(minutes=10)).timestamp()),
             },
             private_key,
