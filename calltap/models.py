@@ -58,6 +58,7 @@ class CallMetadata(BaseModel):
     upload_error: str | None = None
     remote_uri: str | None = None
     uploaded_at: datetime | None = None
+    edited_at: datetime | None = None
     local_pruned: bool = False
 
     def matches_query(self, needle: str) -> bool:
@@ -116,6 +117,12 @@ class PatchCallRequest(BaseModel):
     service: str | None = None
     tags: list[str] | None = None
     notes: str | None = None
+
+
+class EditCallRequest(BaseModel):
+    mode: Literal["keep", "cut"] = "keep"
+    start_seconds: float = Field(ge=0.0)
+    end_seconds: float = Field(gt=0.0)
 
 
 class AutoDetectRequest(BaseModel):

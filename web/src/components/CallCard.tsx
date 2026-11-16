@@ -33,6 +33,7 @@ interface CallCardProps {
   call: CallMetadata;
   selected: boolean;
   cloudConnected: boolean;
+  vmSleeping: boolean;
   onToggleSelect: (callId: string) => void;
   onUpdated: (updated: CallMetadata) => void;
   onRequestDelete: (call: CallMetadata) => void;
@@ -93,6 +94,7 @@ export const CallCard: React.FC<CallCardProps> = ({
   call,
   selected,
   cloudConnected,
+  vmSleeping,
   onToggleSelect,
   onUpdated,
   onRequestDelete,
@@ -333,7 +335,12 @@ export const CallCard: React.FC<CallCardProps> = ({
           </div>
         )}
 
-        <WaveformPlayer call={call} />
+        <WaveformPlayer
+          call={call}
+          vmSleeping={vmSleeping}
+          onEdited={onUpdated}
+          onNotify={onNotify}
+        />
 
         <CollapsiblePanel>
           <CallNotesDrawer call={call} onUpdated={onUpdated} onNotify={onNotify} />

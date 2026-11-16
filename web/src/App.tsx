@@ -309,6 +309,7 @@ export const App: React.FC = () => {
                 call={call}
                 selected={selectedIds.has(call.call_id)}
                 cloudConnected={cloudConnected}
+                vmSleeping={vmSleeping}
                 onToggleSelect={toggleSelect}
                 onUpdated={updateCallItem}
                 onRequestDelete={(target) => setDeleteTargets([target])}

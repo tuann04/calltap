@@ -1,5 +1,6 @@
 import type {
   CallMetadata,
+  EditCallPayload,
   StatusResponse,
   StorageConfigPayload,
   StoragePublicView,
@@ -53,6 +54,11 @@ export const api = {
   ) =>
     request<CallMetadata>(`/api/calls/${encodeURIComponent(callId)}`, {
       method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  editCall: (callId: string, payload: EditCallPayload) =>
+    request<CallMetadata>(`/api/calls/${encodeURIComponent(callId)}/edit`, {
+      method: "POST",
       body: JSON.stringify(payload),
     }),
   deleteCall: (callId: string, deleteRemote = false) =>

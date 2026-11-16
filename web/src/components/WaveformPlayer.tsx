@@ -1,5 +1,5 @@
-import React from "react";
-import { Download, Pause, Play, RotateCcw, RotateCw, Waves } from "lucide-react";
+import React, { useState } from "react";
+import { Download, Pause, Play, RotateCcw, RotateCw, Scissors, Waves } from "lucide-react";
 import {
   SegmentedControl,
   SegmentedControlIndicator,
@@ -7,12 +7,18 @@ import {
 } from "@ui-sdk/react/segmented-control";
 import { Slider, SliderControl, SliderThumb, SliderTrack } from "@ui-sdk/react/slider";
 import { Toolbar, ToolbarButton, ToolbarLink } from "@ui-sdk/react/toolbar";
+import { api } from "../api";
 import { useWaveformAudio, type TrackKey } from "../hooks/useWaveformAudio";
-import type { CallMetadata } from "../types";
+import type { AudioEditMode, CallMetadata } from "../types";
 import { formatCallTitle, formatTime } from "../utils/callDisplay";
+import type { NotifyFn } from "./AppToastRegion";
+import { AudioTrimPanel } from "./AudioTrimPanel";
 
 interface WaveformPlayerProps {
   call: CallMetadata;
+  vmSleeping?: boolean;
+  onEdited?: (updated: CallMetadata) => void;
+  onNotify?: NotifyFn;
 }
 
 interface WaveformBarsProps {
@@ -64,7 +70,12 @@ const WaveformBars: React.FC<WaveformBarsProps> = ({
   </svg>
 );
 
-export const WaveformPlayer: React.FC<WaveformPlayerProps> = ({ call }) => {
+export const WaveformPlayer: React.FC<WaveformPlayerProps> = ({
+  call,
+  vmSleeping = false,
+  onEdited,
+  onNotify,
+}) => {
   const {
     containerRef,
     audioProps,
@@ -74,19 +85,27 @@ export const WaveformPlayer: React.FC<WaveformPlayerProps> = ({ call }) => {
     waveformError,
     loadingWave,
     playing,
+    previewActive,
     displayTime,
     totalDuration,
     progress,
     speed,
     audioError,
     isUnplayablePruned,
+    versionQuery,
     handleSliderChange,
     handleSliderCommit,
     togglePlay,
+    startPreview,
+    stopPreview,
     skip,
     switchTrack,
     cycleSpeed,
   } = useWaveformAudio(call);
+
+  const [editing, setEditing] = useState(false);
+  const [editMode, setEditMode] = useState<AudioEditMode>("keep");
+  const [editRange, setEditRange] = useState<[number, number]>([0, 0]);
 
   if (call.status !== "completed") {
     return (
@@ -123,6 +142,7 @@ export const WaveformPlayer: React.FC<WaveformPlayerProps> = ({ call }) => {
   }
 
   const displayTitle = formatCallTitle(call);
+  const canEdit = !vmSleeping && !call.local_pruned && totalDuration > 0.6;
   const youPeaks = waveform?.tracks.you ?? [];
   const agentPeaks = waveform?.tracks.agent ?? [];
   const mixPeaks = waveform?.tracks.mix ?? [];
@@ -130,6 +150,29 @@ export const WaveformPlayer: React.FC<WaveformPlayerProps> = ({ call }) => {
   const fallbackPeaks = mixPeaks.length > 0 ? mixPeaks : youPeaks.length > 0 ? youPeaks : agentPeaks;
   const singlePeaks =
     fallbackPeaks.length > 0 ? fallbackPeaks : Array.from({ length: 96 }, () => 0.15);
+
+  const [selStart, selEnd] = editRange;
+  const startPct = totalDuration > 0 ? Math.max(0, Math.min(100, (selStart / totalDuration) * 100)) : 0;
+  const endPct = totalDuration > 0 ? Math.max(startPct, Math.min(100, (selEnd / totalDuration) * 100)) : 100;
+
+  const handleApplyEdit = async () => {
+    stopPreview();
+    try {
+      const updated = await api.editCall(call.call_id, {
+        mode: editMode,
+        start_seconds: selStart,
+        end_seconds: selEnd,
+      });
+      setEditing(false);
+      onEdited?.(updated);
+      onNotify?.(
+        editMode === "keep" ? "Recording trimmed across all tracks" : "Selected segment cut from recording"
+      );
+    } catch (err) {
+      onNotify?.(err instanceof Error ? err.message : "Failed to edit recording", "err");
+      throw err;
+    }
+  };
 
   return (
     <div
@@ -182,6 +225,32 @@ export const WaveformPlayer: React.FC<WaveformPlayerProps> = ({ call }) => {
                       : "flex h-12 cursor-pointer items-center touch-none"
                   }
                 >
+                  {editing && totalDuration > 0 && (
+                    <div className="pointer-events-none absolute inset-0 z-10" aria-hidden="true">
+                      {editMode === "keep" ? (
+                        <>
+                          <div
+                            className="absolute inset-y-0 left-0 bg-black/25 dark:bg-black/45"
+                            style={{ width: `${startPct}%` }}
+                          />
+                          <div
+                            className="absolute inset-y-0 border-x-2 border-emerald-500 bg-emerald-500/10"
+                            style={{ left: `${startPct}%`, width: `${endPct - startPct}%` }}
+                          />
+                          <div
+                            className="absolute inset-y-0 right-0 bg-black/25 dark:bg-black/45"
+                            style={{ width: `${100 - endPct}%` }}
+                          />
+                        </>
+                      ) : (
+                        <div
+                          className="absolute inset-y-0 border-x-2 border-red-500 bg-red-500/20"
+                          style={{ left: `${startPct}%`, width: `${endPct - startPct}%` }}
+                        />
+                      )}
+                    </div>
+                  )}
+
                   {hasDual ? (
                     <>
                       <WaveformBars
@@ -306,11 +375,41 @@ export const WaveformPlayer: React.FC<WaveformPlayerProps> = ({ call }) => {
           )}
 
           <Toolbar
-            aria-label={`Download ${displayTitle}`}
-            className="border-0 bg-transparent p-0"
+            aria-label={`Audio actions for ${displayTitle}`}
+            className="gap-1.5 border-0 bg-transparent p-0"
           >
+            <ToolbarButton
+              disabled={!canEdit}
+              aria-pressed={editing}
+              aria-label={`Cut or trim ${displayTitle}`}
+              onClick={() => {
+                if (editing) {
+                  stopPreview();
+                  setEditing(false);
+                } else {
+                  setEditRange([0, Math.round(totalDuration * 10) / 10]);
+                  setEditing(true);
+                }
+              }}
+              className={`inline-flex h-9 sm:h-8 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-xs sm:text-[11px] font-medium ${
+                editing
+                  ? "border-[var(--ds-fg)] bg-[var(--ds-muted)] text-[var(--ds-fg)]"
+                  : "border-[var(--ds-border)] bg-[var(--ds-card)] text-[var(--ds-fg-secondary)] hover:border-[var(--ds-border-strong)] hover:text-[var(--ds-fg)]"
+              }`}
+              title={
+                vmSleeping
+                  ? "Wake VM to edit local audio"
+                  : call.local_pruned
+                    ? "Local audio pruned"
+                    : "Trim or cut audio"
+              }
+            >
+              <Scissors className="h-3.5 w-3.5 sm:h-3 sm:w-3" aria-hidden="true" />
+              <span>Cut</span>
+            </ToolbarButton>
+
             <ToolbarLink
-              href={`/api/calls/${encodeURIComponent(call.call_id)}/audio/${track}?download=1`}
+              href={`/api/calls/${encodeURIComponent(call.call_id)}/audio/${track}?download=1${versionQuery}`}
               className="inline-flex h-9 sm:h-8 shrink-0 items-center gap-1.5 rounded-md border border-[var(--ds-border)] bg-[var(--ds-card)] px-3 sm:px-2.5 text-xs sm:text-[11px] font-medium text-[var(--ds-fg-secondary)] hover:border-[var(--ds-border-strong)] hover:text-[var(--ds-fg)] no-underline"
               title={`Download ${track} audio`}
             >
@@ -322,6 +421,47 @@ export const WaveformPlayer: React.FC<WaveformPlayerProps> = ({ call }) => {
           </Toolbar>
         </div>
       </div>
+
+      {editing && (
+        <AudioTrimPanel
+          callTitle={displayTitle}
+          duration={totalDuration}
+          mode={editMode}
+          range={editRange}
+          previewing={previewActive}
+          onModeChange={(next) => {
+            stopPreview();
+            setEditMode(next);
+          }}
+          onRangeChange={(next) => {
+            stopPreview();
+            setEditRange(next);
+          }}
+          onMarkStart={() => {
+            stopPreview();
+            const clamped = Math.round(Math.min(displayTime, Math.max(0, selEnd - 0.5)) * 10) / 10;
+            setEditRange([clamped, selEnd]);
+          }}
+          onMarkEnd={() => {
+            stopPreview();
+            const clamped =
+              Math.round(Math.max(displayTime, Math.min(totalDuration, selStart + 0.5)) * 10) / 10;
+            setEditRange([selStart, clamped]);
+          }}
+          onTogglePreview={() => {
+            if (previewActive) {
+              stopPreview();
+            } else {
+              void startPreview(editMode, selStart, selEnd);
+            }
+          }}
+          onApply={handleApplyEdit}
+          onCancel={() => {
+            stopPreview();
+            setEditing(false);
+          }}
+        />
+      )}
 
       {audioError && <p className="mt-2 text-xs text-red-500">{audioError}</p>}
     </div>

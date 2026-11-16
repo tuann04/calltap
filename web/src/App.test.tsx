@@ -137,6 +137,15 @@ describe("CallTap UI with ui-sdk", () => {
       ...SAMPLE_CALLS.find((c) => c.call_id === callId)!,
       ...patch,
     }));
+    vi.spyOn(api, "editCall").mockImplementation(async (callId, payload) => ({
+      ...SAMPLE_CALLS.find((c) => c.call_id === callId)!,
+      duration_seconds:
+        payload.mode === "keep"
+          ? payload.end_seconds - payload.start_seconds
+          : 300 - (payload.end_seconds - payload.start_seconds),
+      edited_at: "2026-06-01T10:10:00Z",
+      upload_status: "pending",
+    }));
     vi.spyOn(api, "deleteCall").mockResolvedValue({ deleted: true, call_id: "call-1" });
     vi.spyOn(api, "bulkDelete").mockResolvedValue({ deleted: 0, call_ids: [] });
     vi.spyOn(api, "testStorage").mockResolvedValue({ ok: true, message: "R2 reachable" });
@@ -366,5 +375,55 @@ describe("CallTap UI with ui-sdk", () => {
     const dialog = screen.getByRole("alertdialog", { name: "Delete Recording" });
     const alert = await within(dialog).findByRole("alert");
     expect(alert.textContent).toContain("Disk busy");
+  });
+
+  it("opens inline edit/cut panel, previews range, and guards Apply Cut behind agent confirmation", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByText("Maya Morning Practice");
+
+    await user.click(screen.getByRole("button", { name: "Cut or trim Maya Morning Practice" }));
+
+    const entries = agent.snapshot().filter((e) => !e.offPage && e.component !== "more");
+    for (const entry of entries) {
+      expect(entry.label, `${entry.component} ${entry.ref} has no name`).toBeTruthy();
+    }
+
+    const editLabels = entries.map((e) => e.label);
+    expect(editLabels).toContain("Edit mode for Maya Morning Practice");
+    expect(editLabels).toContain("Selection range for Maya Morning Practice");
+
+    // Switch to Cut range and set a [30, 90] selection via range slider agent action
+    const rangeAct = await agent.act({
+      steps: [
+        { ref: "Edit mode for Maya Morning Practice", action: "setValue", args: ["Cut range"] },
+        { ref: "Selection range for Maya Morning Practice", action: "setValue", args: [[30, 90]] },
+      ],
+    });
+    expect(rangeAct.ok, rangeAct.error?.message).toBe(true);
+    expect(screen.getByText(/Removes 1:00 · Leaves 4:00/)).toBeTruthy();
+
+    // Destructive Apply Cut requires agent confirmation
+    const denied = await agent.act({
+      steps: [{ ref: "Apply Cut to Maya Morning Practice", action: "press" }],
+    });
+    expect(denied.ok).toBe(false);
+    expect(denied.error?.message).toContain("Permanently cuts the recording audio tracks");
+    expect(api.editCall).not.toHaveBeenCalled();
+
+    approveConfirm = true;
+    const allowed = await agent.act({
+      steps: [{ ref: "Apply Cut to Maya Morning Practice", action: "press" }],
+    });
+    expect(allowed.ok, allowed.error?.message).toBe(true);
+
+    await waitFor(() => {
+      expect(api.editCall).toHaveBeenCalledWith("call-1", {
+        mode: "cut",
+        start_seconds: 30,
+        end_seconds: 90,
+      });
+    });
+    expect(await screen.findByText("4m 00s")).toBeTruthy();
   });
 });

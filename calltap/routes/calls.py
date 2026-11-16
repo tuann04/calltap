@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import re
+from datetime import UTC, datetime
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 
+from calltap.audio_edit import edit_call_audio
 from calltap.deps import (
     CallMetaDep,
     ControllerDep,
@@ -17,6 +19,8 @@ from calltap.deps import (
 from calltap.models import (
     BulkCallsRequest,
     CallMetadata,
+    CallStatus,
+    EditCallRequest,
     PatchCallRequest,
     StartCallRequest,
     UploadStatus,
@@ -121,6 +125,45 @@ async def patch_call(
     if meta.upload_status == UploadStatus.UPLOADED and uploader.enabled:
         await uploader.sync_meta_file(meta)
     return meta
+
+
+@router.post("/{call_id}/edit")
+async def edit_call(
+    body: EditCallRequest,
+    meta: CallMetaDep,
+    cfg: SettingsDep,
+    db: DbDep,
+    uploader: UploaderDep,
+) -> CallMetadata:
+    if meta.status != CallStatus.COMPLETED:
+        raise HTTPException(status_code=409, detail="Only completed recordings can be edited")
+    if meta.local_pruned:
+        raise HTTPException(status_code=409, detail="Local audio files were pruned")
+
+    call_dir = cfg.recordings_dir / meta.local_rel_dir
+    try:
+        updated = await edit_call_audio(
+            call_dir,
+            meta,
+            mode=body.mode,
+            start_seconds=body.start_seconds,
+            end_seconds=body.end_seconds,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    requeue = meta.upload_status == UploadStatus.UPLOADED and uploader.enabled
+    if requeue:
+        updated.upload_status = UploadStatus.PENDING
+        updated.upload_error = None
+        db.upsert_call(updated, next_retry_at=datetime.now(UTC))
+    else:
+        db.upsert_call(updated)
+
+    write_meta_file(call_dir, updated)
+    return updated
 
 
 @router.delete("/{call_id}")

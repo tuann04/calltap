@@ -1,17 +1,24 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SliderValueChangeReason } from "@ui-sdk/react/slider";
 import { api } from "../api";
-import type { CallMetadata, WaveformResponse } from "../types";
+import type { AudioEditMode, CallMetadata, WaveformResponse } from "../types";
 
 export type TrackKey = "mix" | "you" | "agent";
 
 const PLAYBACK_RATES = [1, 1.25, 1.5, 2, 0.75];
+
+interface PreviewWindow {
+  mode: AudioEditMode;
+  start: number;
+  end: number;
+}
 
 export function useWaveformAudio(call: CallMetadata) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const pendingSeekRef = useRef<{ time: number; autoPlay: boolean } | null>(null);
   const scrubbingRef = useRef(false);
+  const previewRef = useRef<PreviewWindow | null>(null);
 
   const availableTracks = useMemo(() => {
     const list: { key: TrackKey; label: string; file: string }[] = [];
@@ -28,6 +35,7 @@ export function useWaveformAudio(call: CallMetadata) {
   const [loadingWave, setLoadingWave] = useState(false);
 
   const [playing, setPlaying] = useState(false);
+  const [previewActive, setPreviewActive] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [scrubTime, setScrubTime] = useState<number | null>(null);
   const [duration, setDuration] = useState<number>(call.duration_seconds ?? 0);
@@ -45,6 +53,19 @@ export function useWaveformAudio(call: CallMetadata) {
       setDuration(call.duration_seconds);
     }
   }, [call.duration_seconds, duration]);
+
+  useEffect(() => {
+    previewRef.current = null;
+    setPreviewActive(false);
+    setPlaying(false);
+    setCurrentTime(0);
+    setScrubTime(null);
+    setDuration(call.duration_seconds ?? 0);
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+    }
+  }, [call.edited_at, call.duration_seconds]);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -79,7 +100,7 @@ export function useWaveformAudio(call: CallMetadata) {
         if (cancelled) return;
         setWaveform(data);
         if (data.duration_seconds > 0) {
-          setDuration((prev) => (prev > 0 ? prev : data.duration_seconds));
+          setDuration(data.duration_seconds);
         }
       })
       .catch((err: Error) => {
@@ -91,12 +112,20 @@ export function useWaveformAudio(call: CallMetadata) {
     return () => {
       cancelled = true;
     };
-  }, [isVisible, call.call_id, call.status, isUnplayablePruned]);
+  }, [isVisible, call.call_id, call.status, call.edited_at, isUnplayablePruned]);
+
+  const stopPreview = useCallback(() => {
+    previewRef.current = null;
+    setPreviewActive(false);
+    audioRef.current?.pause();
+  }, []);
 
   const togglePlay = useCallback(async () => {
     const audio = audioRef.current;
     if (!audio) return;
     setAudioError(null);
+    previewRef.current = null;
+    setPreviewActive(false);
     if (playing) {
       audio.pause();
     } else {
@@ -120,6 +149,33 @@ export function useWaveformAudio(call: CallMetadata) {
       }
     },
     [duration]
+  );
+
+  const startPreview = useCallback(
+    async (mode: AudioEditMode, start: number, end: number) => {
+      const audio = audioRef.current;
+      if (!audio) return;
+      setAudioError(null);
+      const total =
+        Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : duration;
+      const initialTime =
+        mode === "keep"
+          ? start
+          : start <= 0.1
+            ? Math.min(total || end, end)
+            : Math.max(0, start - 2);
+      previewRef.current = { mode, start, end };
+      setPreviewActive(true);
+      seekTo(initialTime);
+      try {
+        await audio.play();
+      } catch (err) {
+        previewRef.current = null;
+        setPreviewActive(false);
+        setAudioError(err instanceof Error ? err.message : "Playback failed");
+      }
+    },
+    [duration, seekTo]
   );
 
   const skip = useCallback(
@@ -164,6 +220,8 @@ export function useWaveformAudio(call: CallMetadata) {
         };
         audio.pause();
       }
+      previewRef.current = null;
+      setPreviewActive(false);
       setAudioError(null);
       setTrack(nextTrack);
     },
@@ -178,16 +236,55 @@ export function useWaveformAudio(call: CallMetadata) {
     }
   }, [speed]);
 
+  const totalDuration = duration || waveform?.duration_seconds || 0;
+  const displayTime = scrubTime ?? currentTime;
+  const progress = totalDuration > 0 ? Math.min(1, Math.max(0, displayTime / totalDuration)) : 0;
+  const versionParam = call.edited_at ? `?v=${encodeURIComponent(call.edited_at)}` : "";
+
   const audioProps = {
     ref: audioRef,
-    src: `/api/calls/${encodeURIComponent(call.call_id)}/audio/${track}`,
+    src: `/api/calls/${encodeURIComponent(call.call_id)}/audio/${track}${versionParam}`,
     preload: "metadata" as const,
     onPlay: () => setPlaying(true),
-    onPause: () => setPlaying(false),
-    onEnded: () => setPlaying(false),
+    onPause: () => {
+      setPlaying(false);
+      if (previewRef.current) {
+        previewRef.current = null;
+        setPreviewActive(false);
+      }
+    },
+    onEnded: () => {
+      setPlaying(false);
+      previewRef.current = null;
+      setPreviewActive(false);
+    },
     onTimeUpdate: (e: React.SyntheticEvent<HTMLAudioElement>) => {
+      const el = e.currentTarget;
+      const t = el.currentTime;
+      const preview = previewRef.current;
+      if (preview) {
+        if (preview.mode === "keep" && t >= preview.end) {
+          previewRef.current = null;
+          setPreviewActive(false);
+          el.pause();
+          el.currentTime = preview.end;
+          setCurrentTime(preview.end);
+          return;
+        }
+        if (preview.mode === "cut" && t >= preview.start && t < preview.end - 0.05) {
+          if (preview.end >= totalDuration - 0.05) {
+            previewRef.current = null;
+            setPreviewActive(false);
+            el.pause();
+            return;
+          }
+          el.currentTime = preview.end;
+          setCurrentTime(preview.end);
+          return;
+        }
+      }
       if (!scrubbingRef.current) {
-        setCurrentTime(e.currentTarget.currentTime);
+        setCurrentTime(t);
       }
     },
     onLoadedMetadata: (e: React.SyntheticEvent<HTMLAudioElement>) => {
@@ -207,13 +304,11 @@ export function useWaveformAudio(call: CallMetadata) {
     },
     onError: () => {
       setPlaying(false);
+      previewRef.current = null;
+      setPreviewActive(false);
       setAudioError("Track unavailable or unsupported by this browser.");
     },
   };
-
-  const totalDuration = duration || waveform?.duration_seconds || 0;
-  const displayTime = scrubTime ?? currentTime;
-  const progress = totalDuration > 0 ? Math.min(1, Math.max(0, displayTime / totalDuration)) : 0;
 
   return {
     containerRef,
@@ -224,15 +319,19 @@ export function useWaveformAudio(call: CallMetadata) {
     waveformError,
     loadingWave,
     playing,
+    previewActive,
     displayTime,
     totalDuration,
     progress,
     speed,
     audioError,
     isUnplayablePruned,
+    versionQuery: call.edited_at ? `&v=${encodeURIComponent(call.edited_at)}` : "",
     handleSliderChange,
     handleSliderCommit,
     togglePlay,
+    startPreview,
+    stopPreview,
     skip,
     switchTrack,
     cycleSpeed,

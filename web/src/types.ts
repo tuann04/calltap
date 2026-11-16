@@ -29,7 +29,16 @@ export interface CallMetadata {
   upload_error: string | null;
   remote_uri: string | null;
   uploaded_at: string | null;
+  edited_at?: string | null;
   local_pruned: boolean;
+}
+
+export type AudioEditMode = "keep" | "cut";
+
+export interface EditCallPayload {
+  mode: AudioEditMode;
+  start_seconds: number;
+  end_seconds: number;
 }
 
 export interface StoragePublicView {
