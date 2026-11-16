@@ -310,6 +310,7 @@ export const App: React.FC = () => {
                 selected={selectedIds.has(call.call_id)}
                 cloudConnected={cloudConnected}
                 vmSleeping={vmSleeping}
+                wakeUrl={status?.wake_url || "/?wake=1"}
                 onToggleSelect={toggleSelect}
                 onUpdated={updateCallItem}
                 onRequestDelete={(target) => setDeleteTargets([target])}

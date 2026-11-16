@@ -122,6 +122,14 @@ export async function handleServerlessApi(request, url, env) {
     );
   }
 
+  const editMatch = /^\/api\/calls\/([^/]+)\/edit$/.exec(pathname);
+  if (editMatch && method === "POST") {
+    return Response.json(
+      { detail: "Audio editing needs the recorder VM. Click 'Wake VM' and try again." },
+      { status: 409 }
+    );
+  }
+
   const waveformMatch = /^\/api\/calls\/([^/]+)\/waveform$/.exec(pathname);
   if (waveformMatch && method === "GET") {
     const res = await tryServeR2Waveform(env, decodeURIComponent(waveformMatch[1]));

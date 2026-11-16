@@ -17,6 +17,7 @@ import { AudioTrimPanel } from "./AudioTrimPanel";
 interface WaveformPlayerProps {
   call: CallMetadata;
   vmSleeping?: boolean;
+  wakeUrl?: string;
   onEdited?: (updated: CallMetadata) => void;
   onNotify?: NotifyFn;
 }
@@ -73,6 +74,7 @@ const WaveformBars: React.FC<WaveformBarsProps> = ({
 export const WaveformPlayer: React.FC<WaveformPlayerProps> = ({
   call,
   vmSleeping = false,
+  wakeUrl,
   onEdited,
   onNotify,
 }) => {
@@ -142,7 +144,13 @@ export const WaveformPlayer: React.FC<WaveformPlayerProps> = ({
   }
 
   const displayTitle = formatCallTitle(call);
-  const canEdit = !vmSleeping && !call.local_pruned && totalDuration > 0.6;
+  const editBlockedReason = vmSleeping
+    ? "Wake the recorder VM to edit audio"
+    : call.local_pruned
+      ? "Local audio was pruned after cloud upload"
+      : totalDuration <= 0.6
+        ? "Recording is too short to edit"
+        : null;
   const youPeaks = waveform?.tracks.you ?? [];
   const agentPeaks = waveform?.tracks.agent ?? [];
   const mixPeaks = waveform?.tracks.mix ?? [];
@@ -379,10 +387,19 @@ export const WaveformPlayer: React.FC<WaveformPlayerProps> = ({
             className="gap-1.5 border-0 bg-transparent p-0"
           >
             <ToolbarButton
-              disabled={!canEdit}
               aria-pressed={editing}
               aria-label={`Cut or trim ${displayTitle}`}
+              aria-disabled={Boolean(editBlockedReason)}
               onClick={() => {
+                if (editBlockedReason) {
+                  if (vmSleeping) {
+                    onNotify?.("Waking the recorder VM so audio can be edited...");
+                    window.location.assign(wakeUrl || "/?wake=1");
+                  } else {
+                    onNotify?.(editBlockedReason, "err");
+                  }
+                  return;
+                }
                 if (editing) {
                   stopPreview();
                   setEditing(false);
@@ -394,15 +411,11 @@ export const WaveformPlayer: React.FC<WaveformPlayerProps> = ({
               className={`inline-flex h-9 sm:h-8 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-xs sm:text-[11px] font-medium ${
                 editing
                   ? "border-[var(--ds-fg)] bg-[var(--ds-muted)] text-[var(--ds-fg)]"
-                  : "border-[var(--ds-border)] bg-[var(--ds-card)] text-[var(--ds-fg-secondary)] hover:border-[var(--ds-border-strong)] hover:text-[var(--ds-fg)]"
+                  : editBlockedReason
+                    ? "cursor-not-allowed border-dashed border-[var(--ds-border)] bg-[var(--ds-surface)] text-[var(--ds-fg-muted)] opacity-70"
+                    : "border-[var(--ds-border)] bg-[var(--ds-card)] text-[var(--ds-fg-secondary)] hover:border-[var(--ds-border-strong)] hover:text-[var(--ds-fg)]"
               }`}
-              title={
-                vmSleeping
-                  ? "Wake VM to edit local audio"
-                  : call.local_pruned
-                    ? "Local audio pruned"
-                    : "Trim or cut audio"
-              }
+              title={editBlockedReason ?? "Trim or cut audio"}
             >
               <Scissors className="h-3.5 w-3.5 sm:h-3 sm:w-3" aria-hidden="true" />
               <span>Cut</span>
