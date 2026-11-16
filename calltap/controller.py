@@ -39,6 +39,25 @@ def make_call_id(now: datetime | None = None) -> tuple[str, str]:
     return call_id, rel_dir
 
 
+def _parse_neko_active_listeners(body: str) -> bool | None:
+    seen = False
+    active = 0.0
+    for line in body.splitlines():
+        m = re.match(
+            r"^(?:neko_capture_streamsink_listeners|neko_webrtc_video_listeners)"
+            r"(?:\{[^}]*\})?\s+([0-9.eE+-]+)\s*$",
+            line,
+        )
+        if not m:
+            continue
+        seen = True
+        try:
+            active += float(m.group(1))
+        except ValueError:
+            pass
+    return (active > 0) if seen else None
+
+
 class CallController:
     """Orchestrates call detection, dual-track recording, metadata persistence, and upload queueing."""
 
@@ -71,6 +90,12 @@ class CallController:
         self._stop_event = asyncio.Event()
         self._tasks: list[asyncio.Task[None]] = []
         self._bg_tasks: set[asyncio.Task[None]] = set()
+        self._http_client: httpx.AsyncClient | None = None
+
+    def _http(self) -> httpx.AsyncClient:
+        if self._http_client is None or self._http_client.is_closed:
+            self._http_client = httpx.AsyncClient(timeout=1.0)
+        return self._http_client
 
     @property
     def active_call(self) -> CallMetadata | None:
@@ -102,6 +127,10 @@ class CallController:
         self._bg_tasks.clear()
         if self.recorder.is_recording:
             await self.stop_call(reason="shutdown")
+        await self.inspector.close()
+        if self._http_client is not None and not self._http_client.is_closed:
+            await self._http_client.aclose()
+            self._http_client = None
 
     async def start_call(
         self,
@@ -301,64 +330,76 @@ class CallController:
             self._upload_wake.set()
         return updated_items
 
-    async def delete_call(self, call_id: str, *, delete_remote: bool = False) -> bool:
-        if self._active_meta is not None and self._active_meta.call_id == call_id:
-            raise RuntimeError("Cannot delete an active recording")
-        meta = self.db.get_call(call_id)
-        if meta is None:
-            return False
+    async def _purge_call_files(self, meta: CallMetadata, *, delete_remote: bool) -> None:
         if delete_remote and meta.remote_uri and self.uploader.enabled:
             await self.uploader.delete_remote_dir(meta.remote_uri)
         call_dir = self.settings.recordings_dir / meta.local_rel_dir
         if call_dir.exists():
             shutil.rmtree(call_dir, ignore_errors=True)
-        self.db.delete_call(call_id)
+
+    async def delete_call(self, call_id: str, *, delete_remote: bool = False) -> bool:
+        if self._active_meta is not None and self._active_meta.call_id == call_id:
+            raise RuntimeError("Cannot delete an active recording")
+        meta = self.db.delete_call(call_id)
+        if meta is None:
+            return False
+        await self._purge_call_files(meta, delete_remote=delete_remote)
         return True
 
     async def delete_calls(self, call_ids: list[str], *, delete_remote: bool = False) -> list[str]:
         active_id = self._active_meta.call_id if self._active_meta is not None else None
         deletable = [cid for cid in call_ids if cid != active_id]
         metas = self.db.delete_calls(deletable)
-        deleted_ids: list[str] = []
         for meta in metas:
-            if delete_remote and meta.remote_uri and self.uploader.enabled:
-                await self.uploader.delete_remote_dir(meta.remote_uri)
-            call_dir = self.settings.recordings_dir / meta.local_rel_dir
-            if call_dir.exists():
-                shutil.rmtree(call_dir, ignore_errors=True)
-            deleted_ids.append(meta.call_id)
-        return deleted_ids
+            await self._purge_call_files(meta, delete_remote=delete_remote)
+        return [meta.call_id for meta in metas]
 
     async def _neko_has_active_listeners(self) -> bool | None:
         url = self.settings.neko_metrics_url.strip()
         if not url:
             return None
         try:
-            async with httpx.AsyncClient(timeout=1.0) as client:
-                resp = await client.get(url)
-                resp.raise_for_status()
-                body = resp.text
+            resp = await self._http().get(url)
+            resp.raise_for_status()
+            return _parse_neko_active_listeners(resp.text)
         except (httpx.HTTPError, ValueError):
             return None
 
-        seen = False
-        active = 0.0
-        for line in body.splitlines():
-            m = re.match(
-                r"^(?:neko_capture_streamsink_listeners|neko_webrtc_video_listeners)"
-                r"(?:\{[^}]*\})?\s+([0-9.eE+-]+)\s*$",
-                line,
-            )
-            if not m:
-                continue
-            seen = True
-            try:
-                active += float(m.group(1))
-            except ValueError:
-                pass
-        if not seen:
-            return None
-        return active > 0
+    def _clear_suppression(self) -> None:
+        self._suppressed_capture_index = None
+        self._suppressed_reason = None
+
+    async def _maybe_resume_from_suppression(self, capture_index: int, now_mono: float) -> None:
+        if self._suppressed_capture_index is None:
+            return
+        if capture_index != self._suppressed_capture_index:
+            self._clear_suppression()
+            return
+        if self._suppressed_reason == "manual" or now_mono - self._last_audio_probe_at < 2.0:
+            return
+        self._last_audio_probe_at = now_mono
+        has_audio = await self.pulse.sources_have_audio(
+            [self.settings.agent_source, self.settings.user_source]
+        )
+        if has_audio and await self._neko_has_active_listeners() is not False:
+            self._clear_suppression()
+
+    async def _check_auto_stop_conditions(self, now_mono: float) -> None:
+        silent_for = float(getattr(self.recorder, "silent_for_seconds", 0.0))
+        if self.settings.silence_stop_seconds > 0 and silent_for >= self.settings.silence_stop_seconds:
+            await self.stop_call(reason="auto-silence")
+            return
+
+        if self.settings.neko_disconnect_stop_seconds <= 0:
+            return
+        neko_active = await self._neko_has_active_listeners()
+        if neko_active is False:
+            if self._neko_idle_since is None:
+                self._neko_idle_since = now_mono
+            elif now_mono - self._neko_idle_since >= self.settings.neko_disconnect_stop_seconds:
+                await self.stop_call(reason="auto-neko-idle")
+        elif neko_active is True:
+            self._neko_idle_since = None
 
     async def _monitor_once(self, now_mono: float | None = None) -> None:
         if not self.auto_detect:
@@ -371,62 +412,26 @@ class CallController:
         if capture is not None:
             self._mic_lost_at = None
             self._last_capture_index = capture.index
-
             if not self.recorder.is_recording:
-                if self._suppressed_capture_index is not None:
-                    if capture.index != self._suppressed_capture_index:
-                        self._suppressed_capture_index = None
-                        self._suppressed_reason = None
-                    elif (
-                        self._suppressed_reason != "manual"
-                        and now_mono - self._last_audio_probe_at >= 2.0
-                    ):
-                        self._last_audio_probe_at = now_mono
-                        if await self.pulse.sources_have_audio(
-                            [self.settings.agent_source, self.settings.user_source]
-                        ):
-                            neko_active = await self._neko_has_active_listeners()
-                            if neko_active is not False:
-                                self._suppressed_capture_index = None
-                                self._suppressed_reason = None
+                await self._maybe_resume_from_suppression(capture.index, now_mono)
                 if self._suppressed_capture_index is None:
                     await self.start_call(trigger="auto")
             elif self._active_meta is not None and self._active_meta.trigger == "auto":
-                silent_for = float(getattr(self.recorder, "silent_for_seconds", 0.0))
-                if (
-                    self.settings.silence_stop_seconds > 0
-                    and silent_for >= self.settings.silence_stop_seconds
-                ):
-                    await self.stop_call(reason="auto-silence")
-                    return
+                await self._check_auto_stop_conditions(now_mono)
+            return
 
-                if self.settings.neko_disconnect_stop_seconds > 0:
-                    neko_active = await self._neko_has_active_listeners()
-                    if neko_active is False:
-                        if self._neko_idle_since is None:
-                            self._neko_idle_since = now_mono
-                        elif (
-                            now_mono - self._neko_idle_since
-                            >= self.settings.neko_disconnect_stop_seconds
-                        ):
-                            await self.stop_call(reason="auto-neko-idle")
-                            return
-                    elif neko_active is True:
-                        self._neko_idle_since = None
-        else:
-            self._last_capture_index = None
-            self._suppressed_capture_index = None
-            self._suppressed_reason = None
-            self._neko_idle_since = None
-            if (
-                self.recorder.is_recording
-                and self._active_meta is not None
-                and self._active_meta.trigger == "auto"
-            ):
-                if self._mic_lost_at is None:
-                    self._mic_lost_at = now_mono
-                elif now_mono - self._mic_lost_at >= self.settings.stop_grace_seconds:
-                    await self.stop_call(reason="auto")
+        self._last_capture_index = None
+        self._clear_suppression()
+        self._neko_idle_since = None
+        if (
+            self.recorder.is_recording
+            and self._active_meta is not None
+            and self._active_meta.trigger == "auto"
+        ):
+            if self._mic_lost_at is None:
+                self._mic_lost_at = now_mono
+            elif now_mono - self._mic_lost_at >= self.settings.stop_grace_seconds:
+                await self.stop_call(reason="auto")
 
     async def _monitor_loop(self) -> None:
         while not self._stop_event.is_set():

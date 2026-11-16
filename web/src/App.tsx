@@ -1,52 +1,36 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  CheckSquare,
-  Cloud,
-  CloudOff,
-  ExternalLink,
-  HardDrive,
-  Loader2,
-  Mic,
-  Moon,
-  Power,
-  Radio,
-  RefreshCw,
-  Search,
-  Square,
-  Sun,
-  Trash2,
-  Upload,
-} from "lucide-react";
+import React, { useEffect, useMemo, useState } from "react";
+import { Loader2 } from "lucide-react";
 import { api } from "./api";
 import { CallCard } from "./components/CallCard";
 import { DeleteModal } from "./components/DeleteModal";
+import { LibraryToolbar } from "./components/LibraryToolbar";
+import { Navbar } from "./components/Navbar";
+import { RecorderHero } from "./components/RecorderHero";
 import { StorageModal } from "./components/StorageModal";
-import type { CallMetadata, StatusResponse, StoragePublicView } from "./types";
-import { extractHostname, formatCallTitle, formatServiceLabel } from "./utils/callDisplay";
-
-function formatElapsed(startedAtIso: string): string {
-  const start = new Date(startedAtIso).getTime();
-  if (Number.isNaN(start)) return "00:00";
-  const sec = Math.max(0, Math.floor((Date.now() - start) / 1000));
-  const h = Math.floor(sec / 3600);
-  const m = Math.floor((sec % 3600) / 60);
-  const s = sec % 60;
-  if (h > 0) {
-    return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-  }
-  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-}
+import { Toast } from "./components/Toast";
+import { useCallTapData } from "./hooks/useCallTapData";
+import { useTheme } from "./hooks/useTheme";
+import { useToast } from "./hooks/useToast";
+import type { CallMetadata } from "./types";
+import { formatCallTitle, formatElapsed } from "./utils/callDisplay";
 
 export const App: React.FC = () => {
-  const [theme, setTheme] = useState<"dark" | "light">(() => {
-    const saved = localStorage.getItem("calltap-theme");
-    return saved === "light" ? "light" : "dark";
-  });
-
-  const [status, setStatus] = useState<StatusResponse | null>(null);
-  const [calls, setCalls] = useState<CallMetadata[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
+  const { theme, toggleTheme } = useTheme();
+  const { toast, notify } = useToast();
+  const {
+    status,
+    calls,
+    loading,
+    refreshing,
+    storageView,
+    cloudConnected,
+    vmSleeping,
+    activeTabLabel,
+    fetchAll,
+    updateCallItem,
+    updateStorageView,
+    setAutoDetectLocal,
+  } = useCallTapData(notify);
 
   const [serviceChoice, setServiceChoice] = useState("auto");
   const [newTitle, setNewTitle] = useState("");
@@ -62,85 +46,24 @@ export const App: React.FC = () => {
   const [bulkUploading, setBulkUploading] = useState(false);
   const [elapsedText, setElapsedText] = useState("00:00");
 
-  const [toast, setToast] = useState<{ msg: string; tone: "ok" | "err" } | null>(null);
-
-  const notify = useCallback((msg: string, tone: "ok" | "err" = "ok") => {
-    setToast({ msg, tone });
-  }, []);
-
   useEffect(() => {
-    if (!toast) return;
-    const t = setTimeout(() => setToast(null), 3500);
-    return () => clearTimeout(t);
-  }, [toast]);
-
-  useEffect(() => {
-    const root = document.documentElement;
-    if (theme === "dark") {
-      root.classList.add("dark");
-    } else {
-      root.classList.remove("dark");
-    }
-    localStorage.setItem("calltap-theme", theme);
-    const meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) {
-      meta.setAttribute("content", theme === "dark" ? "#000000" : "#ffffff");
-    }
-  }, [theme]);
-
-  const fetchAll = useCallback(async (quiet = true) => {
-    if (!quiet) setRefreshing(true);
-    try {
-      const [st, list] = await Promise.all([api.getStatus(), api.listCalls()]);
-      setStatus(st);
-      setCalls(list);
-      setSelectedIds((prev) => {
-        const valid = new Set(list.map((c) => c.call_id));
-        const next = new Set<string>();
-        prev.forEach((id) => {
-          if (valid.has(id)) next.add(id);
-        });
-        return next;
+    const valid = new Set(calls.map((c) => c.call_id));
+    setSelectedIds((prev) => {
+      let changed = false;
+      const next = new Set<string>();
+      prev.forEach((id) => {
+        if (valid.has(id)) next.add(id);
+        else changed = true;
       });
-    } catch (err) {
-      if (!quiet) {
-        notify(err instanceof Error ? err.message : "Failed to refresh", "err");
-      }
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [notify]);
-
-  useEffect(() => {
-    fetchAll(true);
-  }, [fetchAll]);
-
-  const hasLiveWork = Boolean(
-    status?.active_call ||
-      calls.some(
-        (c) =>
-          c.status === "recording" ||
-          c.status === "finalizing" ||
-          c.upload_status === "uploading" ||
-          c.upload_status === "pending"
-      )
-  );
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      fetchAll(true);
-    }, hasLiveWork ? 2500 : 8000);
-    return () => clearInterval(interval);
-  }, [fetchAll, hasLiveWork]);
+      return changed ? next : prev;
+    });
+  }, [calls]);
 
   useEffect(() => {
     const active = status?.active_call;
     if (!active) return;
     setElapsedText(formatElapsed(active.started_at));
-    const timer = setInterval(() => {
-      setElapsedText(formatElapsed(active.started_at));
-    }, 1000);
+    const timer = setInterval(() => setElapsedText(formatElapsed(active.started_at)), 1000);
     return () => clearInterval(timer);
   }, [status?.active_call]);
 
@@ -177,10 +100,9 @@ export const App: React.FC = () => {
 
   const handleToggleAutoDetect = async () => {
     if (!status) return;
-    const next = !status.auto_detect;
     try {
-      const res = await api.setAutoDetect(next);
-      setStatus({ ...status, auto_detect: res.auto_detect });
+      const res = await api.setAutoDetect(!status.auto_detect);
+      setAutoDetectLocal(res.auto_detect);
       notify(res.auto_detect ? "Auto-detect enabled" : "Auto-detect paused");
     } catch (err) {
       notify(err instanceof Error ? err.message : "Failed to update auto-detect", "err");
@@ -248,8 +170,6 @@ export const App: React.FC = () => {
     [calls, selectedIds]
   );
 
-  const cloudConnected = Boolean(status?.storage.connected);
-
   const handleBulkUpload = async (ids?: string[]) => {
     if (!cloudConnected) {
       setStorageModalOpen(true);
@@ -304,441 +224,63 @@ export const App: React.FC = () => {
     notify(`Deleted ${ids.length} recording${ids.length === 1 ? "" : "s"}`);
   };
 
-  const storageView: StoragePublicView = status?.storage ?? {
-    connected: false,
-    source: "none",
-    provider: "none",
-    auto_upload: true,
-    bucket: "",
-    prefix: "calls",
-    endpoint: "",
-    region: "",
-    access_key_id: "",
-    has_secret: false,
-    secret_hint: "",
-    has_gdrive_token: false,
-    gdrive_client_id: "",
-    gdrive_root_folder_id: "",
-    remote_label: "Local storage only",
-  };
-
-  const vmSleeping = Boolean(status?.vm_sleeping);
-  const wakeUrl = status?.wake_url || "/?wake=1";
-  const nekoUrl = status?.neko_url || null;
-
-  const activeTabLabel =
-    status?.active_tab?.service && status.active_tab.service !== "unknown"
-      ? status.active_tab.service
-      : extractHostname(status?.active_tab?.url ?? null);
-
   return (
     <div className="min-h-dvh bg-[var(--ds-bg)] text-[var(--ds-fg)]">
-      {/* Sticky Geist Navbar */}
-      <header className="sticky top-0 z-30 border-b border-[var(--ds-border)] bg-[var(--ds-bg)]/85 pt-[env(safe-area-inset-top)] backdrop-blur-md">
-        <div className="mx-auto flex h-13 sm:h-14 max-w-5xl items-center justify-between gap-2 px-3 sm:px-6">
-          <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
-            {/* Vercel-inspired pulse mark */}
-            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-[var(--ds-btn-primary-bg)] text-[var(--ds-btn-primary-fg)]">
-              <Radio className="h-4 w-4" />
-            </div>
-            <div className="flex min-w-0 items-center gap-2">
-              <span className="truncate text-sm font-semibold tracking-tight">CallTap</span>
-              <span
-                className={`h-2 w-2 shrink-0 rounded-full md:hidden ${
-                  vmSleeping
-                    ? "bg-sky-400"
-                    : status?.pulse_healthy
-                      ? "bg-emerald-500"
-                      : "bg-red-500"
-                }`}
-                title={
-                  vmSleeping
-                    ? "Serverless R2 · VM sleeping ($0/hr)"
-                    : status?.pulse_healthy
-                      ? "Audio ready"
-                      : "Pulse offline"
-                }
-              />
-              <span className="hidden sm:inline-block rounded-full border border-[var(--ds-border)] px-2 py-0.5 font-mono text-[10px] text-[var(--ds-fg-muted)]">
-                dual-track
-              </span>
-            </div>
-          </div>
-
-          <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
-            {/* PulseAudio + Browser Tab pill (desktop) */}
-            <div className="hidden md:flex items-center gap-2 rounded-full border border-[var(--ds-border)] bg-[var(--ds-surface)] px-3 py-1 text-xs">
-              <span
-                className={`h-2 w-2 rounded-full ${
-                  vmSleeping
-                    ? "bg-sky-400"
-                    : status?.pulse_healthy
-                      ? "bg-emerald-500"
-                      : "bg-red-500"
-                }`}
-              />
-              <span className="text-[var(--ds-fg-secondary)]">
-                {vmSleeping
-                  ? "VM sleeping ($0/hr) · Serverless R2"
-                  : status?.pulse_healthy
-                    ? "Audio ready"
-                    : "Pulse offline"}
-              </span>
-              {activeTabLabel && (
-                <>
-                  <span className="text-[var(--ds-border-strong)]">/</span>
-                  <span className="max-w-[140px] truncate font-mono text-[11px] text-[var(--ds-fg)]">
-                    {activeTabLabel}
-                  </span>
-                </>
-              )}
-            </div>
-
-            {/* Cloud Storage Connection Pill */}
-            <button
-              type="button"
-              onClick={() => !vmSleeping && setStorageModalOpen(true)}
-              className={`inline-flex h-9 sm:h-8 items-center gap-1.5 rounded-full border px-2.5 sm:px-3 text-xs font-medium transition cursor-pointer ${
-                cloudConnected
-                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/15"
-                  : "border-[var(--ds-border)] bg-[var(--ds-surface)] text-[var(--ds-fg-secondary)] hover:border-[var(--ds-border-strong)] hover:text-[var(--ds-fg)]"
-              }`}
-              title="Configure cloud storage destination"
-            >
-              {cloudConnected ? (
-                <Cloud className="h-3.5 w-3.5 shrink-0" />
-              ) : (
-                <HardDrive className="h-3.5 w-3.5 shrink-0" />
-              )}
-              <span className="max-w-[96px] sm:max-w-[160px] truncate">
-                {cloudConnected ? storageView.remote_label : "Local"}
-                <span className="hidden sm:inline">{!cloudConnected && " Only"}</span>
-              </span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => fetchAll(false)}
-              className="inline-flex h-9 w-9 sm:h-8 sm:w-8 items-center justify-center rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[var(--ds-fg-secondary)] hover:border-[var(--ds-border-strong)] hover:text-[var(--ds-fg)] cursor-pointer"
-              title="Refresh"
-            >
-              <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
-              className="inline-flex h-9 w-9 sm:h-8 sm:w-8 items-center justify-center rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[var(--ds-fg-secondary)] hover:border-[var(--ds-border-strong)] hover:text-[var(--ds-fg)] cursor-pointer"
-              title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
-            >
-              {theme === "dark" ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
-            </button>
-          </div>
-        </div>
-      </header>
+      <Navbar
+        theme={theme}
+        onToggleTheme={toggleTheme}
+        vmSleeping={vmSleeping}
+        pulseHealthy={Boolean(status?.pulse_healthy)}
+        activeTabLabel={activeTabLabel}
+        storageView={storageView}
+        cloudConnected={cloudConnected}
+        refreshing={refreshing}
+        onRefresh={() => fetchAll(false)}
+        onOpenStorage={() => setStorageModalOpen(true)}
+      />
 
       <main className="mx-auto max-w-5xl space-y-5 sm:space-y-6 px-3 py-4 sm:px-6 sm:py-6">
-        {/* Recorder Hero Card */}
-        <section className="rounded-xl border border-[var(--ds-border)] bg-[var(--ds-card)] shadow-xs">
-          {/* Compact mobile audio + tab telemetry strip */}
-          <div className="flex md:hidden items-center justify-between gap-2 border-b border-[var(--ds-border)] bg-[var(--ds-surface)] px-4 py-2 text-xs rounded-t-xl">
-            <span className="inline-flex items-center gap-1.5 text-[var(--ds-fg-secondary)]">
-              <span
-                className={`h-2 w-2 rounded-full ${
-                  vmSleeping
-                    ? "bg-sky-400"
-                    : status?.pulse_healthy
-                      ? "bg-emerald-500"
-                      : "bg-red-500"
-                }`}
-              />
-              {vmSleeping
-                ? "VM sleeping ($0/hr) · Serverless R2"
-                : status?.pulse_healthy
-                  ? "Audio ready"
-                  : "Pulse offline"}
-            </span>
-            {activeTabLabel && (
-              <span className="max-w-[170px] truncate rounded bg-[var(--ds-muted)] px-2 py-0.5 font-mono text-[11px] text-[var(--ds-fg)]">
-                {activeTabLabel}
-              </span>
-            )}
-          </div>
+        <RecorderHero
+          status={status}
+          storageView={storageView}
+          cloudConnected={cloudConnected}
+          vmSleeping={vmSleeping}
+          wakeUrl={status?.wake_url || "/?wake=1"}
+          nekoUrl={status?.neko_url || null}
+          activeTabLabel={activeTabLabel}
+          elapsedText={elapsedText}
+          serviceChoice={serviceChoice}
+          onServiceChoiceChange={setServiceChoice}
+          newTitle={newTitle}
+          onNewTitleChange={setNewTitle}
+          starting={starting}
+          stopping={stopping}
+          onStart={handleStart}
+          onStop={handleStop}
+          onToggleAutoDetect={handleToggleAutoDetect}
+          onOpenStorage={() => setStorageModalOpen(true)}
+        />
 
-          <div className="p-4 sm:p-5">
-            {vmSleeping ? (
-              <div className="flex flex-col gap-3.5 sm:flex-row sm:items-center sm:justify-between">
-                <div className="min-w-0 space-y-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="inline-flex items-center gap-1.5 rounded-full border border-sky-500/30 bg-sky-500/10 px-2.5 py-0.5 text-[11px] font-medium text-sky-400">
-                      <span className="h-1.5 w-1.5 rounded-full bg-sky-400" />
-                      SERVERLESS ARCHIVE · $0/HR COMPUTE
-                    </span>
-                  </div>
-                  <h1 className="text-sm sm:text-base font-semibold text-[var(--ds-fg)]">
-                    Recorder VM is deallocated — browsing &amp; playing directly from Cloudflare R2
-                  </h1>
-                  <p className="text-xs text-[var(--ds-fg-muted)]">
-                    Playback, waveform scrubbing, search, notes, tags, and deletion run at the edge with 0s cold start. Wake the VM only when you want to record a live call.
-                  </p>
-                </div>
+        <LibraryToolbar
+          searchQuery={searchQuery}
+          onSearchChange={setSearchQuery}
+          serviceOptions={serviceOptions}
+          serviceFilter={serviceFilter}
+          onServiceFilterChange={setServiceFilter}
+          totalCallsCount={calls.length}
+          selectableCount={selectableFiltered.length}
+          allFilteredSelected={allFilteredSelected}
+          onToggleSelectAll={toggleSelectAll}
+          cloudConnected={cloudConnected}
+          pendingUploads={status?.pending_uploads ?? 0}
+          bulkUploading={bulkUploading}
+          onUploadAllPending={handleUploadAllPending}
+          selectedCalls={selectedCalls}
+          onBulkUploadSelected={() => handleBulkUpload()}
+          onBulkDeleteSelected={() => setDeleteTargets(selectedCalls)}
+          onClearSelection={() => setSelectedIds(new Set())}
+        />
 
-                <div className="flex flex-wrap items-center gap-2 shrink-0">
-                  {nekoUrl && (
-                    <a
-                      href={nekoUrl}
-                      className="inline-flex h-10 sm:h-9 flex-1 sm:flex-initial items-center justify-center gap-1.5 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-3.5 text-xs font-medium text-[var(--ds-fg)] hover:border-[var(--ds-border-strong)] no-underline"
-                    >
-                      <span>Open Neko</span>
-                      <ExternalLink className="h-3.5 w-3.5 text-[var(--ds-fg-muted)]" />
-                    </a>
-                  )}
-                  <a
-                    href={wakeUrl}
-                    className="inline-flex h-10 sm:h-9 flex-1 sm:flex-initial items-center justify-center gap-1.5 rounded-md bg-[var(--ds-btn-primary-bg)] px-4 text-xs font-semibold text-[var(--ds-btn-primary-fg)] hover:bg-[var(--ds-btn-primary-hover)] no-underline"
-                  >
-                    <Power className="h-3.5 w-3.5" />
-                    <span>Wake VM to Record</span>
-                  </a>
-                </div>
-              </div>
-            ) : status?.active_call ? (
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                <div className="min-w-0 space-y-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="inline-flex items-center gap-1.5 rounded-full border border-red-500/40 bg-red-500/10 px-2.5 py-0.5 text-[11px] font-medium text-red-500">
-                      <span className="h-2 w-2 rounded-full bg-red-500 animate-pulse" />
-                      LIVE RECORDING
-                    </span>
-                    <span className="rounded bg-[var(--ds-muted)] px-2 py-0.5 font-mono text-xs text-[var(--ds-fg-secondary)]">
-                      {formatServiceLabel(status.active_call.service, status.active_call.page_url)}
-                    </span>
-                  </div>
-                  <h1 className="truncate text-base font-semibold text-[var(--ds-fg)]">
-                    {formatCallTitle(status.active_call)}
-                  </h1>
-                  <p className="truncate font-mono text-xs text-[var(--ds-fg-muted)]">
-                    {status.active_call.page_url || "Capturing microphone + browser audio"}
-                  </p>
-                </div>
-
-                <div className="flex items-center gap-3">
-                  <div className="rounded-lg border border-[var(--ds-border)] bg-[var(--ds-surface)] px-4 py-2 font-mono text-xl sm:text-lg font-semibold tabular-nums text-[var(--ds-fg)]">
-                    {elapsedText}
-                  </div>
-                  <button
-                    type="button"
-                    disabled={stopping}
-                    onClick={handleStop}
-                    className="inline-flex h-11 sm:h-10 flex-1 sm:flex-initial items-center justify-center gap-2 rounded-lg bg-red-600 px-4 text-xs font-semibold text-white hover:bg-red-500 disabled:opacity-50 cursor-pointer"
-                  >
-                    {stopping ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Square className="h-3.5 w-3.5 fill-current" />
-                    )}
-                    <span>Stop &amp; Save</span>
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <form
-                onSubmit={handleStart}
-                className="flex flex-col gap-3 sm:flex-row sm:items-end"
-              >
-                <div className="w-full sm:w-48">
-                  <label className="mb-1.5 block text-xs font-medium text-[var(--ds-fg-secondary)]">
-                    Service
-                  </label>
-                  <select
-                    value={serviceChoice}
-                    onChange={(e) => setServiceChoice(e.target.value)}
-                    className="h-11 sm:h-9 w-full rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-3 text-xs font-medium text-[var(--ds-fg)] focus:border-[var(--ds-fg)] focus:outline-none"
-                  >
-                    <option value="auto">Auto-detect (from tab)</option>
-                    <option value="sesame">Sesame</option>
-                    <option value="chatgpt">ChatGPT Voice</option>
-                    <option value="gemini">Gemini Live</option>
-                    <option value="custom">Custom Call</option>
-                  </select>
-                </div>
-
-                <div className="flex-1">
-                  <label className="mb-1.5 block text-xs font-medium text-[var(--ds-fg-secondary)]">
-                    Recording Title <span className="text-[var(--ds-fg-muted)]">(optional)</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={newTitle}
-                    onChange={(e) => setNewTitle(e.target.value)}
-                    placeholder="e.g., Evening English practice with Maya"
-                    className="h-11 sm:h-9 w-full rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-3 text-xs text-[var(--ds-fg)] placeholder:text-[var(--ds-fg-muted)] focus:border-[var(--ds-fg)] focus:outline-none"
-                  />
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={starting}
-                  className="inline-flex h-11 sm:h-9 w-full sm:w-auto shrink-0 items-center justify-center gap-2 rounded-md bg-[var(--ds-btn-primary-bg)] px-4 text-xs font-semibold text-[var(--ds-btn-primary-fg)] hover:bg-[var(--ds-btn-primary-hover)] disabled:opacity-50 cursor-pointer"
-                >
-                  {starting ? (
-                    <Loader2 className="h-4 w-4 sm:h-3.5 sm:w-3.5 animate-spin" />
-                  ) : (
-                    <Mic className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
-                  )}
-                  <span>Start Recording</span>
-                </button>
-              </form>
-            )}
-          </div>
-
-          <div className="flex flex-col items-start gap-2.5 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between border-t border-[var(--ds-border)] bg-[var(--ds-surface)] px-4 sm:px-5 py-3 sm:py-2.5 text-xs text-[var(--ds-fg-muted)] rounded-b-xl">
-            <label className="inline-flex cursor-pointer items-center gap-2.5">
-              <input
-                type="checkbox"
-                checked={Boolean(status?.auto_detect)}
-                disabled={vmSleeping}
-                onChange={handleToggleAutoDetect}
-                className="h-4 w-4 sm:h-3.5 sm:w-3.5 accent-[var(--ds-fg)] cursor-pointer disabled:opacity-50"
-              />
-              <span className="text-[var(--ds-fg-secondary)]">
-                Auto-detect calls from browser microphone
-              </span>
-            </label>
-
-            <button
-              type="button"
-              onClick={() => !vmSleeping && setStorageModalOpen(true)}
-              className="inline-flex items-center gap-1.5 text-left text-xs text-[var(--ds-fg-secondary)] hover:text-[var(--ds-fg)] cursor-pointer"
-            >
-              {cloudConnected ? (
-                <>
-                  <Cloud className="h-3.5 w-3.5 shrink-0 text-emerald-500" />
-                  <span className="truncate">
-                    {vmSleeping
-                      ? `Serving archive directly from ${storageView.remote_label}`
-                      : storageView.auto_upload
-                        ? `Auto-uploading to ${storageView.remote_label}`
-                        : `Connected (${storageView.remote_label}) — manual`}
-                  </span>
-                </>
-              ) : (
-                <>
-                  <CloudOff className="h-3.5 w-3.5 shrink-0" />
-                  <span>Saving locally · Connect R2 / S3 / Google Drive</span>
-                </>
-              )}
-            </button>
-          </div>
-        </section>
-
-        {/* Library Toolbar */}
-        <section className="space-y-3">
-          <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between">
-            <div className="relative flex-1 sm:max-w-md">
-              <Search className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 sm:h-3.5 sm:w-3.5 -translate-y-1/2 text-[var(--ds-fg-muted)]" />
-              <input
-                type="search"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search title, service, notes, or #tag…"
-                className="h-11 sm:h-9 w-full rounded-md border border-[var(--ds-border)] bg-[var(--ds-card)] pl-9 pr-3 text-xs text-[var(--ds-fg)] placeholder:text-[var(--ds-fg-muted)] focus:border-[var(--ds-fg)] focus:outline-none"
-              />
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={toggleSelectAll}
-                disabled={selectableFiltered.length === 0}
-                className="inline-flex h-9 sm:h-8 items-center gap-1.5 rounded-md border border-[var(--ds-border)] bg-[var(--ds-card)] px-3 sm:px-2.5 text-xs text-[var(--ds-fg-secondary)] hover:border-[var(--ds-border-strong)] hover:text-[var(--ds-fg)] disabled:opacity-40 cursor-pointer"
-              >
-                <CheckSquare className="h-3.5 w-3.5" />
-                <span>{allFilteredSelected ? "Deselect All" : "Select All"}</span>
-              </button>
-
-              {cloudConnected && (status?.pending_uploads ?? 0) > 0 && (
-                <button
-                  type="button"
-                  disabled={bulkUploading}
-                  onClick={handleUploadAllPending}
-                  className="inline-flex h-9 sm:h-8 items-center gap-1.5 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 text-xs font-medium text-emerald-500 hover:bg-emerald-500/15 disabled:opacity-50 cursor-pointer"
-                >
-                  {bulkUploading ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <Upload className="h-3.5 w-3.5" />
-                  )}
-                  <span>Upload Pending ({status?.pending_uploads})</span>
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* Service filter pills (horizontal swipeable strip on mobile) */}
-          <div className="no-scrollbar -mx-3 flex items-center gap-1.5 overflow-x-auto px-3 pb-0.5 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0 sm:pb-0">
-            {serviceOptions.map((svc) => {
-              const active = serviceFilter === svc;
-              return (
-                <button
-                  key={svc}
-                  type="button"
-                  onClick={() => setServiceFilter(svc)}
-                  className={`shrink-0 rounded-full border px-3.5 py-1.5 sm:px-3 sm:py-1 text-xs font-medium transition cursor-pointer ${
-                    active
-                      ? "border-[var(--ds-fg)] bg-[var(--ds-btn-primary-bg)] text-[var(--ds-btn-primary-fg)]"
-                      : "border-[var(--ds-border)] bg-[var(--ds-card)] text-[var(--ds-fg-secondary)] hover:border-[var(--ds-border-strong)] hover:text-[var(--ds-fg)]"
-                  }`}
-                >
-                  {svc === "all" ? `All (${calls.length})` : svc}
-                </button>
-              );
-            })}
-          </div>
-        </section>
-
-        {/* Bulk Selection Bar: bottom thumb dock on mobile, sticky top bar on desktop */}
-        {selectedCalls.length > 0 && (
-          <div className="fixed inset-x-3 bottom-[max(12px,env(safe-area-inset-bottom))] z-30 flex flex-wrap items-center justify-between gap-2.5 rounded-2xl border border-[var(--ds-fg)]/40 bg-[var(--ds-card)]/95 px-3.5 py-3 shadow-2xl backdrop-blur-md sm:sticky sm:top-16 sm:inset-x-auto sm:z-20 sm:rounded-xl sm:px-4 sm:py-2.5 sm:shadow-lg">
-            <span className="text-xs font-medium text-[var(--ds-fg)]">
-              {selectedCalls.length} selected
-            </span>
-            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-              <button
-                type="button"
-                disabled={bulkUploading}
-                onClick={() => handleBulkUpload()}
-                className="inline-flex h-9 sm:h-8 items-center gap-1.5 rounded-md bg-[var(--ds-btn-primary-bg)] px-3 text-xs font-medium text-[var(--ds-btn-primary-fg)] hover:bg-[var(--ds-btn-primary-hover)] disabled:opacity-50 cursor-pointer"
-              >
-                {bulkUploading ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Upload className="h-3.5 w-3.5" />
-                )}
-                <span>Upload</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setDeleteTargets(selectedCalls)}
-                className="inline-flex h-9 sm:h-8 items-center gap-1.5 rounded-md border border-red-500/40 bg-red-500/10 px-3 text-xs font-medium text-red-400 hover:bg-red-500/20 cursor-pointer"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-                <span>Delete</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setSelectedIds(new Set())}
-                className="inline-flex h-9 sm:h-8 items-center rounded-md border border-[var(--ds-border)] px-2.5 text-xs text-[var(--ds-fg-secondary)] hover:text-[var(--ds-fg)] cursor-pointer"
-              >
-                Clear
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Calls List */}
         <section
           className={`space-y-3 ${
             selectedCalls.length > 0
@@ -770,11 +312,7 @@ export const App: React.FC = () => {
                 selected={selectedIds.has(call.call_id)}
                 cloudConnected={cloudConnected}
                 onToggleSelect={toggleSelect}
-                onUpdated={(updated) => {
-                  setCalls((prev) =>
-                    prev.map((item) => (item.call_id === updated.call_id ? updated : item))
-                  );
-                }}
+                onUpdated={updateCallItem}
                 onRequestDelete={(target) => setDeleteTargets([target])}
                 onNotify={notify}
               />
@@ -783,13 +321,12 @@ export const App: React.FC = () => {
         </section>
       </main>
 
-      {/* Modals */}
       <StorageModal
         open={storageModalOpen}
         storage={storageView}
         onClose={() => setStorageModalOpen(false)}
         onSaved={(next, message) => {
-          setStatus((prev) => (prev ? { ...prev, storage: next } : prev));
+          updateStorageView(next);
           notify(message);
           fetchAll(true);
         }}
@@ -802,22 +339,7 @@ export const App: React.FC = () => {
         onConfirm={handleConfirmDelete}
       />
 
-      {/* Toast */}
-      {toast && (
-        <div
-          className={`fixed inset-x-4 z-50 rounded-lg border px-4 py-2.5 text-center text-xs font-medium shadow-xl sm:inset-x-auto sm:right-4 sm:bottom-4 sm:text-left ${
-            selectedCalls.length > 0
-              ? "bottom-[calc(max(12px,env(safe-area-inset-bottom))+64px)] sm:bottom-4"
-              : "bottom-[max(16px,env(safe-area-inset-bottom))]"
-          } ${
-            toast.tone === "err"
-              ? "border-red-500/40 bg-red-950/90 text-red-200"
-              : "border-[var(--ds-border-strong)] bg-[var(--ds-card)] text-[var(--ds-fg)]"
-          }`}
-        >
-          {toast.msg}
-        </div>
-      )}
+      <Toast toast={toast} offsetForSelectionBar={selectedCalls.length > 0} />
     </div>
   );
 };

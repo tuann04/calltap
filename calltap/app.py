@@ -1,85 +1,31 @@
 from __future__ import annotations
 
-import logging
-import re
-import secrets
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Annotated, Any, Literal
-from urllib.parse import urlparse
+from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, status
-from fastapi.responses import FileResponse, HTMLResponse
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi import Depends, FastAPI, Request, Response
 from fastapi.staticfiles import StaticFiles
-from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
-from pydantic import BaseModel, Field
 
 from calltap.cdp import ChromeInspector
-from calltap.cf_access import CloudflareAccessVerifier
+from calltap.cf_access import CloudflareAccessVerifier, build_auth_dependency
 from calltap.config import Settings
 from calltap.controller import CallController
 from calltap.db import CallDB
-from calltap.models import CallMetadata, StorageConfig, StoragePublicView, UploadStatus
 from calltap.pulse import PulseMonitor
 from calltap.recorder import DualTrackRecorder
+from calltap.routes import calls as call_routes
+from calltap.routes import ops as ops_routes
+from calltap.routes import storage as storage_routes
 from calltap.storage import StorageManager
 from calltap.telemetry import (
-    BROWSER_EVENTS,
-    CALLS_ACTIVE,
     HTTP_DURATION,
     HTTP_REQUESTS,
-    PENDING_UPLOADS,
-    PULSE_HEALTHY,
     configure_logging,
     configure_telemetry,
-    start_span,
 )
-from calltap.uploader import CloudUploader, write_meta_file
-from calltap.waveform import ensure_call_waveform
-
-_security = HTTPBasic(auto_error=False)
-_client_logger = logging.getLogger("calltap.client")
-
-
-class StartCallRequest(BaseModel):
-    service: str | None = None
-    title: str = ""
-    tags: list[str] = Field(default_factory=list)
-
-
-class PatchCallRequest(BaseModel):
-    title: str | None = None
-    service: str | None = None
-    tags: list[str] | None = None
-    notes: str | None = None
-
-
-class AutoDetectRequest(BaseModel):
-    enabled: bool
-
-
-class BulkCallsRequest(BaseModel):
-    call_ids: list[str] = Field(default_factory=list)
-    delete_remote: bool = False
-
-
-class StorageTestResponse(BaseModel):
-    ok: bool
-    message: str
-
-
-class TelemetryEvent(BaseModel):
-    event: str = Field(min_length=1, max_length=80)
-    level: Literal["debug", "info", "warn", "warning", "error"] = "info"
-    source: str = Field(default="web", max_length=40)
-    message: str = Field(default="", max_length=500)
-    data: dict[str, Any] = Field(default_factory=dict)
-
-
-class TelemetryBatchRequest(BaseModel):
-    events: list[TelemetryEvent] = Field(default_factory=list, max_length=50)
+from calltap.uploader import CloudUploader
 
 
 def _resolve_web_dist() -> Path | None:
@@ -88,10 +34,7 @@ def _resolve_web_dist() -> Path | None:
         Path(__file__).resolve().parent.parent / "web" / "dist",
         Path("/app/web_dist"),
     ]
-    for cand in candidates:
-        if (cand / "index.html").is_file():
-            return cand
-    return None
+    return next((c for c in candidates if (c / "index.html").is_file()), None)
 
 
 def _fallback_html() -> str:
@@ -103,21 +46,6 @@ def _fallback_html() -> str:
   <p>Frontend bundle not found. Run <code>cd web &amp;&amp; npm run build</code>.</p>
 </body>
 </html>"""
-
-
-def _download_filename(meta: CallMetadata, fname: str) -> str:
-    if meta.title.strip():
-        base = meta.title.strip()
-    else:
-        label = meta.service
-        if label in ("unknown", "generic", "") and meta.page_url:
-            host = (urlparse(meta.page_url).hostname or "").lower().removeprefix("www.")
-            if host:
-                label = host
-        stamp = meta.started_at.strftime("%Y-%m-%d_%H-%M")
-        base = f"{label}-{stamp}"
-    slug = re.sub(r"[^a-zA-Z0-9._-]+", "-", base).strip("-._").lower() or meta.call_id
-    return f"{slug[:80]}-{fname}"
 
 
 def create_app(
@@ -147,41 +75,7 @@ def create_app(
         audience=cfg.cf_access_aud,
         allowed_emails=cfg.cf_access_email_set,
     )
-
-    async def require_auth(
-        request: Request,
-        credentials: Annotated[HTTPBasicCredentials | None, Depends(_security)],
-    ) -> None:
-        if access_verifier.enabled:
-            cf_jwt = request.headers.get("cf-access-jwt-assertion") or request.cookies.get(
-                "CF_Authorization"
-            )
-            if cf_jwt and await access_verifier.verify(cf_jwt) is not None:
-                return
-
-        user = cfg.dashboard_user.strip()
-        pw = cfg.dashboard_pass
-        if not user:
-            if access_verifier.enabled:
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Cloudflare Access authentication required",
-                )
-            return
-        if credentials is None:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Authentication required",
-                headers={"WWW-Authenticate": "Basic"},
-            )
-        user_ok = secrets.compare_digest(credentials.username.encode(), user.encode())
-        pass_ok = secrets.compare_digest(credentials.password.encode(), pw.encode())
-        if not (user_ok and pass_ok):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid credentials",
-                headers={"WWW-Authenticate": "Basic"},
-            )
+    auth_dep = [Depends(build_auth_dependency(cfg, access_verifier))]
 
     configure_logging(log_json=cfg.log_json)
 
@@ -196,12 +90,17 @@ def create_app(
             db.close()
 
     app = FastAPI(title="CallTap", version="0.2.0", lifespan=lifespan)
+    dist_dir = _resolve_web_dist()
     app.state.settings = cfg
     app.state.db = db
     app.state.storage = storage
+    app.state.pulse = pulse
     app.state.controller = controller
     app.state.uploader = uploader
     app.state.cf_verifier = access_verifier
+    app.state.index_html = (
+        (dist_dir / "index.html").read_text(encoding="utf-8") if dist_dir else _fallback_html()
+    )
     configure_telemetry(app, cfg)
 
     @app.middleware("http")
@@ -227,233 +126,12 @@ def create_app(
                 max(0.0, time.perf_counter() - started)
             )
 
-    dist_dir = _resolve_web_dist()
     if dist_dir is not None and (dist_dir / "assets").is_dir():
         app.mount("/assets", StaticFiles(directory=dist_dir / "assets"), name="assets")
 
-    @app.get("/healthz")
-    async def healthz() -> dict[str, str]:
-        return {"status": "ok"}
-
-    @app.get("/metrics")
-    async def metrics() -> Response:
-        if not cfg.metrics_enabled:
-            raise HTTPException(status_code=404, detail="Metrics disabled")
-        CALLS_ACTIVE.set(1 if controller.active_call is not None else 0)
-        PENDING_UPLOADS.set(db.count_pending_uploads())
-        return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
-
-    @app.post("/api/telemetry", dependencies=[Depends(require_auth)])
-    async def ingest_telemetry(body: TelemetryBatchRequest | TelemetryEvent) -> dict[str, int]:
-        events = body.events if isinstance(body, TelemetryBatchRequest) else [body]
-        with start_span("client.telemetry", {"telemetry.count": len(events)}):
-            for ev in events:
-                lvl = "warning" if ev.level == "warn" else ev.level
-                BROWSER_EVENTS.labels(source=ev.source, event=ev.event, level=lvl).inc()
-                log_fn = getattr(_client_logger, lvl, _client_logger.info)
-                log_fn(
-                    "client event %s: %s",
-                    ev.event,
-                    ev.message or "-",
-                    extra={
-                        "client_source": ev.source,
-                        "client_event": ev.event,
-                        "client_data": ev.data,
-                    },
-                )
-        return {"accepted": len(events)}
-
-    @app.get("/", response_class=HTMLResponse, dependencies=[Depends(require_auth)])
-    async def index() -> HTMLResponse:
-        if dist_dir is not None:
-            return HTMLResponse((dist_dir / "index.html").read_text(encoding="utf-8"))
-        return HTMLResponse(_fallback_html())
-
-    @app.get("/api/status", dependencies=[Depends(require_auth)])
-    async def get_status() -> dict[str, object]:
-        pulse_ok = await pulse.is_healthy()
-        PULSE_HEALTHY.set(1 if pulse_ok else 0)
-        pending = db.count_pending_uploads()
-        PENDING_UPLOADS.set(pending)
-        tab = await inspector.active_tab()
-        storage_view = storage.public_view()
-        return {
-            "active_call": controller.active_call.model_dump() if controller.active_call else None,
-            "auto_detect": controller.auto_detect,
-            "pulse_healthy": pulse_ok,
-            "rclone_remote": storage_view.remote_label if storage_view.connected else None,
-            "storage": storage_view.model_dump(),
-            "pending_uploads": pending,
-            "active_tab": {"service": tab.service, "url": tab.url, "title": tab.title},
-        }
-
-    @app.post("/api/auto-detect", dependencies=[Depends(require_auth)])
-    async def set_auto_detect(body: AutoDetectRequest) -> dict[str, bool]:
-        controller.auto_detect = body.enabled
-        return {"auto_detect": controller.auto_detect}
-
-    @app.post("/api/calls/start", dependencies=[Depends(require_auth)])
-    async def start_call(body: StartCallRequest | None = None) -> CallMetadata:
-        req = body or StartCallRequest()
-        return await controller.start_call(
-            trigger="manual",
-            service_override=req.service,
-            title=req.title,
-            tags=req.tags,
-        )
-
-    @app.post("/api/calls/stop", dependencies=[Depends(require_auth)])
-    async def stop_call() -> dict[str, object]:
-        meta = await controller.stop_call(reason="manual")
-        return {"stopped": meta is not None, "call": meta.model_dump() if meta else None}
-
-    @app.get("/api/calls", dependencies=[Depends(require_auth)])
-    async def list_calls(
-        limit: int = 100,
-        service: str | None = None,
-        upload_status: UploadStatus | None = None,
-        q: str | None = None,
-    ) -> list[CallMetadata]:
-        items = db.list_calls(limit=limit, service=service, upload_status=upload_status)
-        if q and q.strip():
-            needle = q.strip().lower()
-            items = [
-                c
-                for c in items
-                if needle in c.title.lower()
-                or needle in c.service.lower()
-                or needle in c.call_id.lower()
-                or needle in c.notes.lower()
-                or needle in (c.page_url or "").lower()
-                or needle in (c.page_title or "").lower()
-                or any(needle in t.lower() for t in c.tags)
-            ]
-        return items
-
-    @app.post("/api/calls/bulk-upload", dependencies=[Depends(require_auth)])
-    async def bulk_upload(body: BulkCallsRequest) -> dict[str, object]:
-        if not uploader.enabled:
-            raise HTTPException(
-                status_code=400,
-                detail="Connect a cloud storage provider before uploading",
-            )
-        updated = await controller.trigger_upload_many(body.call_ids)
-        return {"queued": len(updated), "calls": [c.model_dump() for c in updated]}
-
-    @app.post("/api/calls/bulk-delete", dependencies=[Depends(require_auth)])
-    async def bulk_delete(body: BulkCallsRequest) -> dict[str, object]:
-        deleted = await controller.delete_calls(body.call_ids, delete_remote=body.delete_remote)
-        return {"deleted": len(deleted), "call_ids": deleted}
-
-    @app.get("/api/calls/{call_id}", dependencies=[Depends(require_auth)])
-    async def get_call(call_id: str) -> CallMetadata:
-        meta = db.get_call(call_id)
-        if meta is None:
-            raise HTTPException(status_code=404, detail="Call not found")
-        return meta
-
-    @app.patch("/api/calls/{call_id}", dependencies=[Depends(require_auth)])
-    async def patch_call(call_id: str, body: PatchCallRequest) -> CallMetadata:
-        meta = db.get_call(call_id)
-        if meta is None:
-            raise HTTPException(status_code=404, detail="Call not found")
-        if body.title is not None:
-            meta.title = body.title.strip()
-        if body.service is not None and body.service.strip():
-            meta.service = body.service.strip()
-        if body.tags is not None:
-            meta.tags = body.tags
-        if body.notes is not None:
-            meta.notes = body.notes
-        db.upsert_call(meta)
-        call_dir = cfg.recordings_dir / meta.local_rel_dir
-        if call_dir.exists():
-            write_meta_file(call_dir, meta)
-        if meta.upload_status == UploadStatus.UPLOADED and uploader.enabled:
-            await uploader.sync_meta_file(meta)
-        return meta
-
-    @app.delete("/api/calls/{call_id}", dependencies=[Depends(require_auth)])
-    async def delete_call(
-        call_id: str,
-        delete_remote: bool = Query(default=False),
-    ) -> dict[str, object]:
-        try:
-            ok = await controller.delete_call(call_id, delete_remote=delete_remote)
-        except RuntimeError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        if not ok:
-            raise HTTPException(status_code=404, detail="Call not found")
-        return {"deleted": True, "call_id": call_id}
-
-    @app.post("/api/calls/{call_id}/upload", dependencies=[Depends(require_auth)])
-    async def retry_upload(call_id: str) -> CallMetadata:
-        if not uploader.enabled:
-            raise HTTPException(
-                status_code=400,
-                detail="Connect a cloud storage provider before uploading",
-            )
-        meta = await controller.trigger_upload_now(call_id)
-        if meta is None:
-            raise HTTPException(status_code=404, detail="Call not found")
-        return meta
-
-    @app.get("/api/calls/{call_id}/waveform", dependencies=[Depends(require_auth)])
-    async def get_waveform(call_id: str) -> dict[str, object]:
-        meta = db.get_call(call_id)
-        if meta is None:
-            raise HTTPException(status_code=404, detail="Call not found")
-        call_dir = cfg.recordings_dir / meta.local_rel_dir
-        if not call_dir.exists():
-            raise HTTPException(status_code=404, detail="Call directory not found")
-        return await ensure_call_waveform(call_dir, meta)
-
-    @app.get("/api/calls/{call_id}/audio/{track}", dependencies=[Depends(require_auth)])
-    async def stream_audio(
-        call_id: str,
-        track: Literal["you", "agent", "mix"],
-        download: bool = Query(default=False),
-    ) -> FileResponse:
-        meta = db.get_call(call_id)
-        if meta is None:
-            raise HTTPException(status_code=404, detail="Call not found")
-        fname = getattr(meta.files, track)
-        if not fname:
-            raise HTTPException(status_code=404, detail=f"Track {track} disabled")
-        fpath = cfg.recordings_dir / meta.local_rel_dir / fname
-        if not fpath.exists():
-            raise HTTPException(status_code=404, detail="Audio file not on disk (possibly pruned)")
-        media_type = "audio/ogg" if fname.endswith(".opus") else "audio/flac"
-        headers = None
-        if download:
-            dl_name = _download_filename(meta, fname)
-            headers = {"Content-Disposition": f'attachment; filename="{dl_name}"'}
-        return FileResponse(fpath, media_type=media_type, headers=headers)
-
-    @app.get("/api/storage", dependencies=[Depends(require_auth)])
-    async def get_storage() -> StoragePublicView:
-        return storage.public_view()
-
-    @app.put("/api/storage", dependencies=[Depends(require_auth)])
-    async def update_storage(body: StorageConfig) -> StoragePublicView:
-        try:
-            view = storage.save(body)
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        if view.connected and view.auto_upload:
-            controller.wake_uploader()
-        return view
-
-    @app.post("/api/storage/test", dependencies=[Depends(require_auth)])
-    async def test_storage(body: StorageConfig | None = None) -> StorageTestResponse:
-        try:
-            ok, msg = await storage.test_connection(body)
-        except ValueError as exc:
-            return StorageTestResponse(ok=False, message=str(exc))
-        return StorageTestResponse(ok=ok, message=msg)
-
-    @app.delete("/api/storage", dependencies=[Depends(require_auth)])
-    async def delete_storage() -> StoragePublicView:
-        return storage.disconnect()
+    app.include_router(ops_routes.public_router)
+    app.include_router(ops_routes.protected_router, dependencies=auth_dep)
+    app.include_router(call_routes.router, dependencies=auth_dep)
+    app.include_router(storage_routes.router, dependencies=auth_dep)
 
     return app

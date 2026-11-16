@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from calltap.models import CallMetadata
+from calltap.utils import atomic_write_text
 
 DEFAULT_BINS = 180
 SAMPLE_RATE = 8000
@@ -107,7 +108,5 @@ async def ensure_call_waveform(
         "tracks": tracks,
     }
     if tracks and call_dir.exists():
-        tmp = call_dir / "peaks.json.tmp"
-        tmp.write_text(json.dumps(payload), encoding="utf-8")
-        tmp.replace(peaks_path)
+        atomic_write_text(peaks_path, json.dumps(payload))
     return payload

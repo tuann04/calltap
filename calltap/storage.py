@@ -6,10 +6,12 @@ import json
 import os
 import tempfile
 from dataclasses import dataclass
+from io import StringIO
 from pathlib import Path
 
 from calltap.config import Settings
 from calltap.models import StorageConfig, StorageProvider, StoragePublicView
+from calltap.utils import atomic_write_text
 
 
 @dataclass(frozen=True)
@@ -51,29 +53,27 @@ def _normalize_endpoint(endpoint: str) -> str:
     return ep.rstrip("/")
 
 
+_S3_RCLONE_PROVIDERS = {
+    StorageProvider.R2: "Cloudflare",
+    StorageProvider.S3: "AWS",
+    StorageProvider.B2: "Other",
+    StorageProvider.CUSTOM_S3: "Other",
+}
+
+
 def render_rclone_ini(cfg: StorageConfig) -> str:
     cp = configparser.ConfigParser(interpolation=None)
     sec = "calltap_remote"
 
-    if cfg.provider in (
-        StorageProvider.R2,
-        StorageProvider.S3,
-        StorageProvider.B2,
-        StorageProvider.CUSTOM_S3,
-    ):
-        provider_map = {
-            StorageProvider.R2: "Cloudflare",
-            StorageProvider.S3: "AWS",
-            StorageProvider.B2: "Other",
-            StorageProvider.CUSTOM_S3: "Other",
-        }
+    if cfg.provider in _S3_RCLONE_PROVIDERS:
+        default_region = "auto" if cfg.provider == StorageProvider.R2 else "us-east-1"
         cp[sec] = {
             "type": "s3",
-            "provider": provider_map[cfg.provider],
+            "provider": _S3_RCLONE_PROVIDERS[cfg.provider],
             "env_auth": "false",
             "access_key_id": cfg.access_key_id.strip(),
             "secret_access_key": cfg.secret_access_key.strip(),
-            "region": (cfg.region or ("auto" if cfg.provider == StorageProvider.R2 else "us-east-1")).strip(),
+            "region": (cfg.region or default_region).strip(),
             "no_check_bucket": "true",
         }
         ep = _normalize_endpoint(cfg.endpoint)
@@ -91,8 +91,6 @@ def render_rclone_ini(cfg: StorageConfig) -> str:
             cp[sec]["client_secret"] = cfg.gdrive_client_secret.strip()
         if cfg.gdrive_root_folder_id.strip():
             cp[sec]["root_folder_id"] = cfg.gdrive_root_folder_id.strip()
-
-    from io import StringIO
 
     buf = StringIO()
     cp.write(buf)
@@ -126,12 +124,6 @@ class StorageManager:
         except (OSError, ValueError):
             return None
 
-    def get_config_for_edit(self) -> StorageConfig:
-        ui = self._read_ui_config()
-        if ui is not None:
-            return ui
-        return StorageConfig()
-
     def resolve_target(self) -> RcloneTarget | None:
         ui = self._read_ui_config()
         if ui is not None:
@@ -162,16 +154,7 @@ class StorageManager:
 
     def public_view(self) -> StoragePublicView:
         ui = self._read_ui_config()
-        if ui is not None:
-            if ui.provider == StorageProvider.NONE:
-                return StoragePublicView(
-                    connected=False,
-                    source="none",
-                    provider=StorageProvider.NONE,
-                    auto_upload=ui.auto_upload,
-                    prefix=ui.prefix or "calls",
-                    remote_label="Local storage only",
-                )
+        if ui is not None and ui.provider != StorageProvider.NONE:
             remote_label = (
                 f"gdrive:{ui.bucket or 'CallTap'}"
                 if ui.provider == StorageProvider.GDRIVE
@@ -195,7 +178,7 @@ class StorageManager:
                 remote_label=remote_label,
             )
 
-        env_remote = self.settings.rclone_remote.strip()
+        env_remote = self.settings.rclone_remote.strip() if ui is None else ""
         if env_remote:
             return StoragePublicView(
                 connected=True,
@@ -210,8 +193,8 @@ class StorageManager:
             connected=False,
             source="none",
             provider=StorageProvider.NONE,
-            auto_upload=True,
-            prefix="calls",
+            auto_upload=ui.auto_upload if ui is not None else True,
+            prefix=(ui.prefix or "calls") if ui is not None else "calls",
             remote_label="Local storage only",
         )
 
@@ -227,12 +210,13 @@ class StorageManager:
             )
 
         # Preserve existing secrets if omitted during an update (e.g. toggling auto_upload).
-        if not merged.secret_access_key.strip() and existing.provider == merged.provider:
-            merged.secret_access_key = existing.secret_access_key
-        if not merged.gdrive_token_json.strip() and existing.provider == merged.provider:
-            merged.gdrive_token_json = existing.gdrive_token_json
-        if not merged.gdrive_client_secret.strip() and existing.provider == merged.provider:
-            merged.gdrive_client_secret = existing.gdrive_client_secret
+        if existing.provider == merged.provider:
+            if not merged.secret_access_key.strip():
+                merged.secret_access_key = existing.secret_access_key
+            if not merged.gdrive_token_json.strip():
+                merged.gdrive_token_json = existing.gdrive_token_json
+            if not merged.gdrive_client_secret.strip():
+                merged.gdrive_client_secret = existing.gdrive_client_secret
 
         merged.prefix = (merged.prefix or "calls").strip().strip("/")
         merged.bucket = merged.bucket.strip().strip("/")
@@ -257,29 +241,14 @@ class StorageManager:
         return merged
 
     def _write_rclone_conf(self, cfg: StorageConfig) -> None:
-        self.rclone_ui_conf.parent.mkdir(parents=True, exist_ok=True)
-        ini_text = render_rclone_ini(cfg)
-        tmp = self.rclone_ui_conf.with_suffix(".tmp")
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write(ini_text)
-        finally:
-            pass
-        tmp.replace(self.rclone_ui_conf)
+        atomic_write_text(self.rclone_ui_conf, render_rclone_ini(cfg), mode=0o600)
 
     def save(self, incoming: StorageConfig) -> StoragePublicView:
         merged = self._validate_and_merge(incoming)
-        self.storage_file.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self.storage_file.with_suffix(".tmp")
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(merged.model_dump_json(indent=2) + "\n")
-        tmp.replace(self.storage_file)
+        atomic_write_text(self.storage_file, merged.model_dump_json(indent=2) + "\n", mode=0o600)
 
         if merged.provider == StorageProvider.NONE:
-            if self.rclone_ui_conf.exists():
-                self.rclone_ui_conf.unlink()
+            self.rclone_ui_conf.unlink(missing_ok=True)
         else:
             self._write_rclone_conf(merged)
 

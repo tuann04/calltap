@@ -66,10 +66,6 @@ class Settings(BaseSettings):
     metrics_enabled: bool = True
 
     @property
-    def cf_access_enabled(self) -> bool:
-        return bool(self.cf_access_team.strip() and self.cf_access_aud.strip())
-
-    @property
     def cf_access_email_set(self) -> set[str]:
         return {
             item.strip().lower()

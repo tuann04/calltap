@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from enum import StrEnum
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -59,6 +60,17 @@ class CallMetadata(BaseModel):
     uploaded_at: datetime | None = None
     local_pruned: bool = False
 
+    def matches_query(self, needle: str) -> bool:
+        return (
+            needle in self.title.lower()
+            or needle in self.service.lower()
+            or needle in self.call_id.lower()
+            or needle in self.notes.lower()
+            or needle in (self.page_url or "").lower()
+            or needle in (self.page_title or "").lower()
+            or any(needle in t.lower() for t in self.tags)
+        )
+
 
 class StorageConfig(BaseModel):
     provider: StorageProvider = StorageProvider.NONE
@@ -91,3 +103,42 @@ class StoragePublicView(BaseModel):
     gdrive_client_id: str = ""
     gdrive_root_folder_id: str = ""
     remote_label: str = ""
+
+
+class StartCallRequest(BaseModel):
+    service: str | None = None
+    title: str = ""
+    tags: list[str] = Field(default_factory=list)
+
+
+class PatchCallRequest(BaseModel):
+    title: str | None = None
+    service: str | None = None
+    tags: list[str] | None = None
+    notes: str | None = None
+
+
+class AutoDetectRequest(BaseModel):
+    enabled: bool
+
+
+class BulkCallsRequest(BaseModel):
+    call_ids: list[str] = Field(default_factory=list)
+    delete_remote: bool = False
+
+
+class StorageTestResponse(BaseModel):
+    ok: bool
+    message: str
+
+
+class TelemetryEvent(BaseModel):
+    event: str = Field(min_length=1, max_length=80)
+    level: Literal["debug", "info", "warn", "warning", "error"] = "info"
+    source: str = Field(default="web", max_length=40)
+    message: str = Field(default="", max_length=500)
+    data: dict[str, Any] = Field(default_factory=dict)
+
+
+class TelemetryBatchRequest(BaseModel):
+    events: list[TelemetryEvent] = Field(default_factory=list, max_length=50)

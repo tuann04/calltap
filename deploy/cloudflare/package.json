@@ -4,7 +4,7 @@
   "description": "Cloudflare Worker that wakes the CallTap Azure VM",
   "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test wake-worker.test.mjs"
   },
   "devDependencies": {
     "cf": "^1.0.0-beta.32",

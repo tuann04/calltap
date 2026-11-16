@@ -2,13 +2,20 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import secrets
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Annotated, Any
 
 import httpx
 import jwt
+from fastapi import Depends, HTTPException, Request, status
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
+
+if TYPE_CHECKING:
+    from calltap.config import Settings
 
 logger = logging.getLogger(__name__)
+_http_basic = HTTPBasic(auto_error=False)
 
 
 def normalize_team_domain(team: str) -> str:
@@ -124,3 +131,44 @@ class CloudflareAccessVerifier:
                 return None
 
         return claims
+
+
+def build_auth_dependency(cfg: Settings, access_verifier: CloudflareAccessVerifier) -> Any:
+    """Create the FastAPI dependency enforcing Cloudflare Access JWT or HTTP Basic Auth."""
+
+    async def require_auth(
+        request: Request,
+        credentials: Annotated[HTTPBasicCredentials | None, Depends(_http_basic)],
+    ) -> None:
+        if access_verifier.enabled:
+            cf_jwt = request.headers.get("cf-access-jwt-assertion") or request.cookies.get(
+                "CF_Authorization"
+            )
+            if cf_jwt and await access_verifier.verify(cf_jwt) is not None:
+                return
+
+        user = cfg.dashboard_user.strip()
+        pw = cfg.dashboard_pass
+        if not user:
+            if access_verifier.enabled:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Cloudflare Access authentication required",
+                )
+            return
+        if credentials is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Authentication required",
+                headers={"WWW-Authenticate": "Basic"},
+            )
+        user_ok = secrets.compare_digest(credentials.username.encode(), user.encode())
+        pass_ok = secrets.compare_digest(credentials.password.encode(), pw.encode())
+        if not (user_ok and pass_ok):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid credentials",
+                headers={"WWW-Authenticate": "Basic"},
+            )
+
+    return require_auth

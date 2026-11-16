@@ -165,10 +165,6 @@ def configure_telemetry(app: Any, settings: Settings) -> None:
         app.state._otel_instrumented = True
 
 
-def get_tracer(name: str) -> Any:
-    return trace.get_tracer(name)
-
-
 def start_span(name: str, attributes: dict[str, Any] | None = None) -> Any:
     try:
         tracer = trace.get_tracer("calltap")

@@ -201,16 +201,19 @@ class CallDB:
         return meta
 
     def delete_calls(self, call_ids: list[str]) -> list[CallMetadata]:
-        deleted: list[CallMetadata] = []
-        for cid in call_ids:
-            meta = self.get_call(cid)
-            if meta is not None:
-                deleted.append(meta)
+        if not call_ids:
+            return []
+        placeholders = ",".join("?" for _ in call_ids)
+        rows = self._conn.execute(
+            f"SELECT meta_json FROM calls WHERE call_id IN ({placeholders})",
+            call_ids,
+        ).fetchall()
+        deleted = [CallMetadata.model_validate_json(r["meta_json"]) for r in rows]
         if not deleted:
             return []
-        placeholders = ",".join("?" for _ in deleted)
+        del_placeholders = ",".join("?" for _ in deleted)
         self._conn.execute(
-            f"DELETE FROM calls WHERE call_id IN ({placeholders})",
+            f"DELETE FROM calls WHERE call_id IN ({del_placeholders})",
             [m.call_id for m in deleted],
         )
         self._conn.commit()

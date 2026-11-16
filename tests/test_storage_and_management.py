@@ -12,6 +12,32 @@ from calltap.models import CallStatus, StorageConfig, StorageProvider, UploadSta
 from calltap.recorder import RecordingResult
 
 
+class _StubRecorder:
+    def __init__(self) -> None:
+        self.is_recording = False
+        self.silent_for_seconds = 0.0
+        self._dir: Path | None = None
+
+    async def start(self, call_dir: Path, **_kwargs) -> None:
+        self._dir = call_dir
+        (call_dir / "you.flac").write_bytes(b"fLaC-you")
+        (call_dir / "agent.flac").write_bytes(b"fLaC-agent")
+        (call_dir / "mix.opus").write_bytes(b"OggS-mix")
+        self.is_recording = True
+
+    async def stop(self) -> RecordingResult:
+        assert self._dir is not None
+        d = self._dir
+        self.is_recording = False
+        return RecordingResult(
+            you_path=d / "you.flac",
+            agent_path=d / "agent.flac",
+            mix_path=d / "mix.opus",
+            exit_code=0,
+            stderr_tail="",
+        )
+
+
 def test_storage_connect_mask_and_call_management(tmp_path: Path) -> None:
     cfg = Settings(
         data_dir=tmp_path,
@@ -28,32 +54,7 @@ def test_storage_connect_mask_and_call_management(tmp_path: Path) -> None:
     ctrl.inspector.active_tab = AsyncMock(
         return_value=TabContext(service="sesame", url="https://app.sesame.com", title="Sesame")
     )
-
-    counter = {"n": 0}
-    recording_dir_holder: dict[str, Path] = {}
-
-    async def fake_start(call_dir: Path, **_kwargs) -> None:
-        counter["n"] += 1
-        recording_dir_holder["dir"] = call_dir
-        (call_dir / "you.flac").write_bytes(b"fLaC-you")
-        (call_dir / "agent.flac").write_bytes(b"fLaC-agent")
-        (call_dir / "mix.opus").write_bytes(b"OggS-mix")
-        ctrl.recorder._proc = object()
-
-    async def fake_stop() -> RecordingResult:
-        d = recording_dir_holder["dir"]
-        ctrl.recorder._proc = None
-        return RecordingResult(
-            you_path=d / "you.flac",
-            agent_path=d / "agent.flac",
-            mix_path=d / "mix.opus",
-            exit_code=0,
-            stderr_tail="",
-        )
-
-    ctrl.recorder.start = fake_start  # type: ignore[method-assign]
-    ctrl.recorder.stop = fake_stop  # type: ignore[method-assign]
-    type(ctrl.recorder).is_recording = property(lambda self: self._proc is not None)  # type: ignore[misc]
+    ctrl.recorder = _StubRecorder()  # type: ignore[assignment]
 
     with TestClient(app) as client:
         # Initially local-only with no preconfigured keys
@@ -247,29 +248,7 @@ def test_unknown_service_preserves_url_and_clean_download_name(tmp_path: Path) -
         )
     )
 
-    recording_dir_holder: dict[str, Path] = {}
-
-    async def fake_start(call_dir: Path, **_kwargs) -> None:
-        recording_dir_holder["dir"] = call_dir
-        (call_dir / "you.flac").write_bytes(b"fLaC-you")
-        (call_dir / "agent.flac").write_bytes(b"fLaC-agent")
-        (call_dir / "mix.opus").write_bytes(b"OggS-mix")
-        ctrl.recorder._proc = object()
-
-    async def fake_stop() -> RecordingResult:
-        d = recording_dir_holder["dir"]
-        ctrl.recorder._proc = None
-        return RecordingResult(
-            you_path=d / "you.flac",
-            agent_path=d / "agent.flac",
-            mix_path=d / "mix.opus",
-            exit_code=0,
-            stderr_tail="",
-        )
-
-    ctrl.recorder.start = fake_start  # type: ignore[method-assign]
-    ctrl.recorder.stop = fake_stop  # type: ignore[method-assign]
-    type(ctrl.recorder).is_recording = property(lambda self: self._proc is not None)  # type: ignore[misc]
+    ctrl.recorder = _StubRecorder()  # type: ignore[assignment]
 
     with TestClient(app) as client:
         started = client.post("/api/calls/start").json()

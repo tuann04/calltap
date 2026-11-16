@@ -13,6 +13,7 @@ from calltap.db import CallDB
 from calltap.models import CallMetadata, UploadStatus
 from calltap.storage import RcloneTarget, StorageManager
 from calltap.telemetry import UPLOAD_DURATION, UPLOADS_TOTAL, start_span
+from calltap.utils import atomic_write_text
 from calltap.waveform import ensure_call_waveform
 
 logger = logging.getLogger(__name__)
@@ -33,11 +34,7 @@ def backoff_seconds(attempt: int) -> int:
 
 
 def write_meta_file(call_dir: Path, meta: CallMetadata) -> None:
-    call_dir.mkdir(parents=True, exist_ok=True)
-    tmp = call_dir / "meta.json.tmp"
-    target = call_dir / "meta.json"
-    tmp.write_text(meta.model_dump_json(indent=2) + "\n", encoding="utf-8")
-    tmp.replace(target)
+    atomic_write_text(call_dir / "meta.json", meta.model_dump_json(indent=2) + "\n")
 
 
 class CloudUploader:

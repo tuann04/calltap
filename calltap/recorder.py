@@ -22,6 +22,13 @@ class RecordingResult:
     stderr_tail: str
 
 
+def _input_args(source: str, input_format: str, sample_rate: int) -> list[str]:
+    # PulseAudio inputs use thread_queue_size so bursts never drop frames on either track.
+    if input_format == "pulse":
+        return ["-thread_queue_size", "1024", "-f", "pulse", "-ac", "2", "-ar", str(sample_rate), "-i", source]
+    return ["-f", input_format, "-i", source]
+
+
 def build_ffmpeg_command(
     *,
     user_source: str,
@@ -37,132 +44,46 @@ def build_ffmpeg_command(
 ) -> list[str]:
     """Build a single-process ffmpeg command recording user + agent into synced separate files."""
     cmd = ["ffmpeg", "-hide_banner"]
-    if enable_silence_detect:
-        cmd.extend(["-loglevel", "info", "-nostats"])
-    else:
-        cmd.extend(["-loglevel", "warning"])
+    cmd.extend(["-loglevel", "info", "-nostats"] if enable_silence_detect else ["-loglevel", "warning"])
     cmd.append("-y")
     if extra_global_args:
         cmd.extend(extra_global_args)
 
-    # PulseAudio inputs use thread_queue_size so bursts never drop frames on either track.
-    if input_format == "pulse":
-        cmd.extend(
-            [
-                "-thread_queue_size",
-                "1024",
-                "-f",
-                "pulse",
-                "-ac",
-                "2",
-                "-ar",
-                str(sample_rate),
-                "-i",
-                user_source,
-                "-thread_queue_size",
-                "1024",
-                "-f",
-                "pulse",
-                "-ac",
-                "2",
-                "-ar",
-                str(sample_rate),
-                "-i",
-                agent_source,
-            ]
-        )
-    else:
-        cmd.extend(["-f", input_format, "-i", user_source, "-f", input_format, "-i", agent_source])
+    cmd.extend(_input_args(user_source, input_format, sample_rate))
+    cmd.extend(_input_args(agent_source, input_format, sample_rate))
 
-    if mix_path is not None:
-        if enable_silence_detect:
-            filter_complex = (
-                f"[0:a]aresample={sample_rate}:async=1:first_pts=0,"
-                f"pan=mono|c0=0.5*c0+0.5*c1,asplit=2[you_f][you_m];"
-                f"[1:a]aresample={sample_rate}:async=1:first_pts=0,"
-                f"pan=mono|c0=0.5*c0+0.5*c1,asplit=2[agent_f][agent_m];"
-                f"[you_m][agent_m]amerge=inputs=2[mix];"
-                f"[mix]asplit=2[mix_out][sil_in];"
-                f"[sil_in]silencedetect=n={silence_threshold_db:.1f}dB:d=1[sil_out]"
-            )
-            mix_map = "[mix_out]"
+    need_merge = mix_path is not None or enable_silence_detect
+    filters = []
+    for idx, name in ((0, "you"), (1, "agent")):
+        base = f"[{idx}:a]aresample={sample_rate}:async=1:first_pts=0,pan=mono|c0=0.5*c0+0.5*c1"
+        if need_merge:
+            filters.append(f"{base},asplit=2[{name}_f][{name}_m]")
         else:
-            filter_complex = (
-                f"[0:a]aresample={sample_rate}:async=1:first_pts=0,"
-                f"pan=mono|c0=0.5*c0+0.5*c1,asplit=2[you_f][you_m];"
-                f"[1:a]aresample={sample_rate}:async=1:first_pts=0,"
-                f"pan=mono|c0=0.5*c0+0.5*c1,asplit=2[agent_f][agent_m];"
-                f"[you_m][agent_m]amerge=inputs=2[mix]"
-            )
-            mix_map = "[mix]"
-        cmd.extend(
-            [
-                "-filter_complex",
-                filter_complex,
-                "-map",
-                "[you_f]",
-                "-c:a",
-                "flac",
-                "-compression_level",
-                "5",
-                str(you_path),
-                "-map",
-                "[agent_f]",
-                "-c:a",
-                "flac",
-                "-compression_level",
-                "5",
-                str(agent_path),
-                "-map",
-                mix_map,
-                "-c:a",
-                "libopus",
-                "-b:a",
-                "96k",
-                str(mix_path),
-            ]
-        )
-        if enable_silence_detect:
-            cmd.extend(["-map", "[sil_out]", "-f", "null", "-"])
+            filters.append(f"{base}[{name}_f]")
+
+    if mix_path is not None and enable_silence_detect:
+        filters.append("[you_m][agent_m]amerge=inputs=2[mix]")
+        filters.append("[mix]asplit=2[mix_out][sil_in]")
+        filters.append(f"[sil_in]silencedetect=n={silence_threshold_db:.1f}dB:d=1[sil_out]")
+        mix_map = "[mix_out]"
+    elif mix_path is not None:
+        filters.append("[you_m][agent_m]amerge=inputs=2[mix]")
+        mix_map = "[mix]"
+    elif enable_silence_detect:
+        filters.append(f"[you_m][agent_m]amerge=inputs=2,silencedetect=n={silence_threshold_db:.1f}dB:d=1[sil_out]")
+        mix_map = ""
     else:
-        if enable_silence_detect:
-            filter_complex = (
-                f"[0:a]aresample={sample_rate}:async=1:first_pts=0,"
-                f"pan=mono|c0=0.5*c0+0.5*c1,asplit=2[you_f][you_m];"
-                f"[1:a]aresample={sample_rate}:async=1:first_pts=0,"
-                f"pan=mono|c0=0.5*c0+0.5*c1,asplit=2[agent_f][agent_m];"
-                f"[you_m][agent_m]amerge=inputs=2,"
-                f"silencedetect=n={silence_threshold_db:.1f}dB:d=1[sil_out]"
-            )
-        else:
-            filter_complex = (
-                f"[0:a]aresample={sample_rate}:async=1:first_pts=0,"
-                f"pan=mono|c0=0.5*c0+0.5*c1[you_f];"
-                f"[1:a]aresample={sample_rate}:async=1:first_pts=0,"
-                f"pan=mono|c0=0.5*c0+0.5*c1[agent_f]"
-            )
-        cmd.extend(
-            [
-                "-filter_complex",
-                filter_complex,
-                "-map",
-                "[you_f]",
-                "-c:a",
-                "flac",
-                "-compression_level",
-                "5",
-                str(you_path),
-                "-map",
-                "[agent_f]",
-                "-c:a",
-                "flac",
-                "-compression_level",
-                "5",
-                str(agent_path),
-            ]
-        )
-        if enable_silence_detect:
-            cmd.extend(["-map", "[sil_out]", "-f", "null", "-"])
+        mix_map = ""
+
+    cmd.extend([
+        "-filter_complex", ";".join(filters),
+        "-map", "[you_f]", "-c:a", "flac", "-compression_level", "5", str(you_path),
+        "-map", "[agent_f]", "-c:a", "flac", "-compression_level", "5", str(agent_path),
+    ])
+    if mix_path is not None:
+        cmd.extend(["-map", mix_map, "-c:a", "libopus", "-b:a", "96k", str(mix_path)])
+    if enable_silence_detect:
+        cmd.extend(["-map", "[sil_out]", "-f", "null", "-"])
     return cmd
 
 

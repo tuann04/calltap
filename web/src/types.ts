@@ -92,3 +92,21 @@ export interface WaveformResponse {
     mix?: number[];
   };
 }
+
+export const EMPTY_STORAGE_VIEW: StoragePublicView = {
+  connected: false,
+  source: "none",
+  provider: "none",
+  auto_upload: true,
+  bucket: "",
+  prefix: "calls",
+  endpoint: "",
+  region: "",
+  access_key_id: "",
+  has_secret: false,
+  secret_hint: "",
+  has_gdrive_token: false,
+  gdrive_client_id: "",
+  gdrive_root_folder_id: "",
+  remote_label: "Local storage only",
+};

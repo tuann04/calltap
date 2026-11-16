@@ -13,8 +13,15 @@ import {
   X,
 } from "lucide-react";
 import { api } from "../api";
-import type { CallMetadata } from "../types";
-import { extractHostname, formatCallTitle, formatServiceLabel } from "../utils/callDisplay";
+import type { CallMetadata, UploadStatus } from "../types";
+import {
+  extractHostname,
+  formatCallTitle,
+  formatDuration,
+  formatServiceLabel,
+  formatStartedAt,
+} from "../utils/callDisplay";
+import { CallNotesDrawer } from "./CallNotesDrawer";
 import { WaveformPlayer } from "./WaveformPlayer";
 
 interface CallCardProps {
@@ -27,27 +34,55 @@ interface CallCardProps {
   onNotify: (msg: string, tone?: "ok" | "err") => void;
 }
 
-function formatDuration(sec: number | null): string {
-  if (sec == null) return "—";
-  const s = Math.max(0, Math.round(sec));
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const rem = s % 60;
-  if (h > 0) return `${h}h ${String(m).padStart(2, "0")}m`;
-  if (m > 0) return `${m}m ${String(rem).padStart(2, "0")}s`;
-  return `${rem}s`;
-}
+const UPLOAD_BADGE_CONFIG: Record<
+  UploadStatus,
+  { label: string; className: string; icon?: "cloud" | "spinner" | "off" }
+> = {
+  uploaded: {
+    label: "Synced",
+    className: "border-emerald-500/30 bg-emerald-500/10 text-emerald-500",
+    icon: "cloud",
+  },
+  uploading: {
+    label: "Uploading",
+    className: "border-amber-500/30 bg-amber-500/10 text-amber-400",
+    icon: "spinner",
+  },
+  pending: {
+    label: "Pending upload",
+    className: "border-amber-500/30 bg-amber-500/10 text-amber-400",
+  },
+  failed: {
+    label: "Upload failed",
+    className: "border-red-500/30 bg-red-500/10 text-red-400",
+  },
+  disabled: {
+    label: "Local only",
+    className: "border-[var(--ds-border)] bg-[var(--ds-surface)] text-[var(--ds-fg-muted)]",
+    icon: "off",
+  },
+};
 
-function formatStartedAt(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
+const UploadBadge: React.FC<{ call: CallMetadata }> = ({ call }) => {
+  const cfg = UPLOAD_BADGE_CONFIG[call.upload_status] ?? UPLOAD_BADGE_CONFIG.disabled;
+  const title =
+    call.upload_status === "uploaded"
+      ? (call.remote_uri ?? "Uploaded to cloud")
+      : call.upload_status === "failed"
+        ? (call.upload_error ?? "Upload failed")
+        : undefined;
+  return (
+    <span
+      title={title}
+      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium ${cfg.className}`}
+    >
+      {cfg.icon === "cloud" && <Cloud className="h-3 w-3" />}
+      {cfg.icon === "spinner" && <Loader2 className="h-3 w-3 animate-spin" />}
+      {cfg.icon === "off" && <CloudOff className="h-3 w-3" />}
+      <span>{cfg.label}</span>
+    </span>
+  );
+};
 
 export const CallCard: React.FC<CallCardProps> = ({
   call,
@@ -61,23 +96,12 @@ export const CallCard: React.FC<CallCardProps> = ({
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState(call.title);
   const [savingTitle, setSavingTitle] = useState(false);
-
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const [notesDraft, setNotesDraft] = useState(call.notes);
-  const [tagsDraft, setTagsDraft] = useState(call.tags.join(", "));
-  const [savingDetails, setSavingDetails] = useState(false);
   const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
     if (!editingTitle) setTitleDraft(call.title);
   }, [call.title, editingTitle]);
-
-  useEffect(() => {
-    if (!detailsOpen) {
-      setNotesDraft(call.notes);
-      setTagsDraft(call.tags.join(", "));
-    }
-  }, [call.notes, call.tags, detailsOpen]);
 
   const saveTitle = async () => {
     const trimmed = titleDraft.trim();
@@ -98,27 +122,6 @@ export const CallCard: React.FC<CallCardProps> = ({
     }
   };
 
-  const saveDetails = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSavingDetails(true);
-    try {
-      const parsedTags = tagsDraft
-        .split(",")
-        .map((t) => t.trim())
-        .filter(Boolean);
-      const updated = await api.patchCall(call.call_id, {
-        notes: notesDraft,
-        tags: parsedTags,
-      });
-      onUpdated(updated);
-      onNotify("Saved notes & tags");
-    } catch (err) {
-      onNotify(err instanceof Error ? err.message : "Failed to update notes", "err");
-    } finally {
-      setSavingDetails(false);
-    }
-  };
-
   const handleUpload = async () => {
     setUploading(true);
     try {
@@ -135,51 +138,6 @@ export const CallCard: React.FC<CallCardProps> = ({
   const displayTitle = formatCallTitle(call);
   const pageHost = extractHostname(call.page_url);
   const serviceBadge = formatServiceLabel(call.service, null);
-
-  const renderUploadBadge = () => {
-    switch (call.upload_status) {
-      case "uploaded":
-        return (
-          <span
-            title={call.remote_uri ?? "Uploaded to cloud"}
-            className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-500"
-          >
-            <Cloud className="h-3 w-3" />
-            <span>Synced</span>
-          </span>
-        );
-      case "uploading":
-        return (
-          <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-400">
-            <Loader2 className="h-3 w-3 animate-spin" />
-            <span>Uploading</span>
-          </span>
-        );
-      case "pending":
-        return (
-          <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[11px] font-medium text-amber-400">
-            <span>Pending upload</span>
-          </span>
-        );
-      case "failed":
-        return (
-          <span
-            title={call.upload_error ?? "Upload failed"}
-            className="inline-flex items-center gap-1 rounded-full border border-red-500/30 bg-red-500/10 px-2 py-0.5 text-[11px] font-medium text-red-400"
-          >
-            <span>Upload failed</span>
-          </span>
-        );
-      default:
-        return (
-          <span className="inline-flex items-center gap-1 rounded-full border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2 py-0.5 text-[11px] text-[var(--ds-fg-muted)]">
-            <CloudOff className="h-3 w-3" />
-            <span>Local only</span>
-          </span>
-        );
-    }
-  };
-
   const canUpload =
     cloudConnected &&
     call.status === "completed" &&
@@ -195,7 +153,6 @@ export const CallCard: React.FC<CallCardProps> = ({
           : "border-[var(--ds-border)] bg-[var(--ds-card)] hover:border-[var(--ds-border-strong)]"
       } p-3.5 sm:p-4`}
     >
-      {/* Top Row */}
       <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex min-w-0 flex-1 items-start gap-3">
           <input
@@ -302,7 +259,6 @@ export const CallCard: React.FC<CallCardProps> = ({
           </div>
         </div>
 
-        {/* Status & Row Actions */}
         <div className="flex flex-wrap items-center justify-between gap-2 sm:justify-end">
           <div className="flex items-center gap-2">
             {call.status === "recording" && (
@@ -311,7 +267,7 @@ export const CallCard: React.FC<CallCardProps> = ({
                 Recording
               </span>
             )}
-            {renderUploadBadge()}
+            <UploadBadge call={call} />
           </div>
 
           <div className="flex items-center gap-1.5">
@@ -361,65 +317,10 @@ export const CallCard: React.FC<CallCardProps> = ({
         </div>
       )}
 
-      {/* Waveform & Playback */}
       <WaveformPlayer call={call} />
 
-      {/* Notes / Tags Drawer */}
       {detailsOpen && (
-        <form
-          onSubmit={saveDetails}
-          className="mt-3 space-y-2.5 rounded-lg border border-[var(--ds-border)] bg-[var(--ds-surface)] p-3"
-        >
-          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-            <div>
-              <label className="mb-1 block text-[11px] font-medium text-[var(--ds-fg-secondary)]">
-                Tags (comma separated)
-              </label>
-              <input
-                type="text"
-                value={tagsDraft}
-                onChange={(e) => setTagsDraft(e.target.value)}
-                placeholder="english, interview, daily"
-                className="h-10 sm:h-auto w-full rounded-md border border-[var(--ds-border)] bg-[var(--ds-card)] px-2.5 py-1.5 text-xs text-[var(--ds-fg)] focus:border-[var(--ds-fg)] focus:outline-none"
-              />
-            </div>
-            <div className="min-w-0">
-              <label className="mb-1 block text-[11px] font-medium text-[var(--ds-fg-secondary)]">
-                Remote Location
-              </label>
-              <div className="truncate rounded-md border border-[var(--ds-border)] bg-[var(--ds-card)] px-2.5 py-2 sm:py-1.5 font-mono text-[11px] text-[var(--ds-fg-muted)]">
-                {call.remote_uri ?? "Not uploaded"}
-              </div>
-            </div>
-          </div>
-
-          <div>
-            <label className="mb-1 block text-[11px] font-medium text-[var(--ds-fg-secondary)]">
-              Notes
-            </label>
-            <textarea
-              rows={2}
-              value={notesDraft}
-              onChange={(e) => setNotesDraft(e.target.value)}
-              placeholder="Add observations, topics discussed, follow-ups…"
-              className="w-full rounded-md border border-[var(--ds-border)] bg-[var(--ds-card)] px-2.5 py-2 sm:py-1.5 text-xs text-[var(--ds-fg)] focus:border-[var(--ds-fg)] focus:outline-none"
-            />
-          </div>
-
-          <div className="flex items-center justify-between gap-2">
-            <span className="truncate font-mono text-[11px] text-[var(--ds-fg-muted)]">
-              ID: {call.call_id}
-            </span>
-            <button
-              type="submit"
-              disabled={savingDetails}
-              className="inline-flex h-9 sm:h-7 shrink-0 items-center gap-1.5 rounded-md bg-[var(--ds-btn-primary-bg)] px-3.5 sm:px-3 text-xs font-medium text-[var(--ds-btn-primary-fg)] hover:bg-[var(--ds-btn-primary-hover)] disabled:opacity-50 cursor-pointer"
-            >
-              {savingDetails && <Loader2 className="h-3 w-3 animate-spin" />}
-              <span>Save Details</span>
-            </button>
-          </div>
-        </form>
+        <CallNotesDrawer call={call} onUpdated={onUpdated} onNotify={onNotify} />
       )}
     </article>
   );

@@ -5,6 +5,8 @@ from urllib.parse import urlparse
 
 import httpx
 
+from calltap.utils import extract_hostname
+
 
 @dataclass(frozen=True)
 class TabContext:
@@ -27,9 +29,9 @@ _DOMAIN_TO_SERVICE: list[tuple[str, str]] = [
 
 
 def classify_service_from_url(url: str | None, default: str = "unknown") -> str:
-    if not url:
+    host = extract_hostname(url)
+    if not host:
         return default
-    host = (urlparse(url).hostname or "").lower()
     for domain, service in _DOMAIN_TO_SERVICE:
         if host == domain or host.endswith(f".{domain}"):
             return service
@@ -42,19 +44,28 @@ class ChromeInspector:
     def __init__(self, cdp_url: str, default_service: str = "unknown") -> None:
         self.cdp_url = cdp_url.rstrip("/")
         self.default_service = default_service
+        self._client: httpx.AsyncClient | None = None
+
+    def _http(self) -> httpx.AsyncClient:
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(timeout=1.5)
+        return self._client
+
+    async def close(self) -> None:
+        if self._client is not None and not self._client.is_closed:
+            await self._client.aclose()
+            self._client = None
 
     async def active_tab(self) -> TabContext:
         if not self.cdp_url:
             return TabContext(service=self.default_service)
         try:
-            parsed = urlparse(self.cdp_url)
-            port = parsed.port or 9222
+            port = urlparse(self.cdp_url).port or 9222
             # Chrome rejects non-localhost Host headers on CDP HTTP endpoints.
             headers = {"Host": f"localhost:{port}"}
-            async with httpx.AsyncClient(timeout=1.5) as client:
-                resp = await client.get(f"{self.cdp_url}/json/list", headers=headers)
-                resp.raise_for_status()
-                targets = resp.json()
+            resp = await self._http().get(f"{self.cdp_url}/json/list", headers=headers)
+            resp.raise_for_status()
+            targets = resp.json()
         except (httpx.HTTPError, ValueError):
             return TabContext(service=self.default_service)
 
@@ -67,13 +78,13 @@ class ChromeInspector:
             return TabContext(service=self.default_service)
 
         # Prefer a known voice-agent tab if multiple tabs are open.
-        chosen = pages[0]
-        for p in pages:
-            if classify_service_from_url(p.get("url"), "") != "":
-                chosen = p
-                break
-
+        chosen = next(
+            (p for p in pages if classify_service_from_url(p.get("url"), "") != ""),
+            pages[0],
+        )
         url = chosen.get("url")
-        title = chosen.get("title")
-        service = classify_service_from_url(url, default=self.default_service)
-        return TabContext(service=service, url=url, title=title)
+        return TabContext(
+            service=classify_service_from_url(url, default=self.default_service),
+            url=url,
+            title=chosen.get("title"),
+        )
