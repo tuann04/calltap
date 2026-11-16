@@ -1,22 +1,20 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { api } from "./api";
+import { AppToastRegion, notify } from "./components/AppToastRegion";
 import { CallCard } from "./components/CallCard";
 import { DeleteModal } from "./components/DeleteModal";
 import { LibraryToolbar } from "./components/LibraryToolbar";
 import { Navbar } from "./components/Navbar";
 import { RecorderHero } from "./components/RecorderHero";
 import { StorageModal } from "./components/StorageModal";
-import { Toast } from "./components/Toast";
 import { useCallTapData } from "./hooks/useCallTapData";
 import { useTheme } from "./hooks/useTheme";
-import { useToast } from "./hooks/useToast";
 import type { CallMetadata } from "./types";
 import { formatCallTitle, formatElapsed } from "./utils/callDisplay";
 
 export const App: React.FC = () => {
   const { theme, toggleTheme } = useTheme();
-  const { toast, notify } = useToast();
   const {
     status,
     calls,
@@ -290,7 +288,7 @@ export const App: React.FC = () => {
         >
           {loading ? (
             <div className="flex items-center justify-center rounded-xl border border-[var(--ds-border)] bg-[var(--ds-card)] py-16 text-xs text-[var(--ds-fg-muted)]">
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
               Loading recordings…
             </div>
           ) : filteredCalls.length === 0 ? (
@@ -339,7 +337,7 @@ export const App: React.FC = () => {
         onConfirm={handleConfirmDelete}
       />
 
-      <Toast toast={toast} offsetForSelectionBar={selectedCalls.length > 0} />
+      <AppToastRegion offsetForSelectionBar={selectedCalls.length > 0} />
     </div>
   );
 };

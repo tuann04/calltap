@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { SliderValueChangeReason } from "@ui-sdk/react/slider";
 import { api } from "../api";
 import type { CallMetadata, WaveformResponse } from "../types";
 
@@ -9,8 +10,8 @@ const PLAYBACK_RATES = [1, 1.25, 1.5, 2, 0.75];
 export function useWaveformAudio(call: CallMetadata) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const trackRef = useRef<HTMLDivElement | null>(null);
   const pendingSeekRef = useRef<{ time: number; autoPlay: boolean } | null>(null);
+  const scrubbingRef = useRef(false);
 
   const availableTracks = useMemo(() => {
     const list: { key: TrackKey; label: string; file: string }[] = [];
@@ -28,9 +29,9 @@ export function useWaveformAudio(call: CallMetadata) {
 
   const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
+  const [scrubTime, setScrubTime] = useState<number | null>(null);
   const [duration, setDuration] = useState<number>(call.duration_seconds ?? 0);
   const [speed, setSpeed] = useState<number>(1);
-  const [isScrubbing, setIsScrubbing] = useState(false);
   const [audioError, setAudioError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -107,16 +108,49 @@ export function useWaveformAudio(call: CallMetadata) {
     }
   }, [playing]);
 
-  const skip = useCallback(
-    (delta: number) => {
+  const seekTo = useCallback(
+    (target: number) => {
       const audio = audioRef.current;
-      if (!audio) return;
-      const total = Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : duration;
-      const next = Math.max(0, Math.min(total || 0, audio.currentTime + delta));
-      audio.currentTime = next;
-      setCurrentTime(next);
+      const total =
+        audio && Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : duration;
+      const clamped = Math.max(0, Math.min(total || target, target));
+      setCurrentTime(clamped);
+      if (audio) {
+        audio.currentTime = clamped;
+      }
     },
     [duration]
+  );
+
+  const skip = useCallback(
+    (delta: number) => {
+      const base = audioRef.current?.currentTime ?? currentTime;
+      seekTo(base + delta);
+    },
+    [currentTime, seekTo]
+  );
+
+  const handleSliderChange = useCallback(
+    (next: number, details: { reason: SliderValueChangeReason }) => {
+      if (details.reason === "drag") {
+        scrubbingRef.current = true;
+        setScrubTime(next);
+        return;
+      }
+      scrubbingRef.current = false;
+      setScrubTime(null);
+      seekTo(next);
+    },
+    [seekTo]
+  );
+
+  const handleSliderCommit = useCallback(
+    (next: number) => {
+      scrubbingRef.current = false;
+      setScrubTime(null);
+      seekTo(next);
+    },
+    [seekTo]
   );
 
   const switchTrack = useCallback(
@@ -144,38 +178,6 @@ export function useWaveformAudio(call: CallMetadata) {
     }
   }, [speed]);
 
-  const seekFromClientX = useCallback(
-    (clientX: number) => {
-      const box = trackRef.current?.getBoundingClientRect();
-      const audio = audioRef.current;
-      if (!box || box.width <= 0) return;
-      const total =
-        audio && Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : duration;
-      if (!total || total <= 0) return;
-      const ratio = Math.max(0, Math.min(1, (clientX - box.left) / box.width));
-      const target = ratio * total;
-      setCurrentTime(target);
-      if (audio) {
-        audio.currentTime = target;
-      }
-    },
-    [duration]
-  );
-
-  useEffect(() => {
-    if (!isScrubbing) return;
-    const onMove = (e: PointerEvent) => seekFromClientX(e.clientX);
-    const onUp = () => setIsScrubbing(false);
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-    window.addEventListener("pointercancel", onUp);
-    return () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      window.removeEventListener("pointercancel", onUp);
-    };
-  }, [isScrubbing, seekFromClientX]);
-
   const audioProps = {
     ref: audioRef,
     src: `/api/calls/${encodeURIComponent(call.call_id)}/audio/${track}`,
@@ -184,7 +186,7 @@ export function useWaveformAudio(call: CallMetadata) {
     onPause: () => setPlaying(false),
     onEnded: () => setPlaying(false),
     onTimeUpdate: (e: React.SyntheticEvent<HTMLAudioElement>) => {
-      if (!isScrubbing) {
+      if (!scrubbingRef.current) {
         setCurrentTime(e.currentTarget.currentTime);
       }
     },
@@ -210,11 +212,11 @@ export function useWaveformAudio(call: CallMetadata) {
   };
 
   const totalDuration = duration || waveform?.duration_seconds || 0;
-  const progress = totalDuration > 0 ? Math.min(1, Math.max(0, currentTime / totalDuration)) : 0;
+  const displayTime = scrubTime ?? currentTime;
+  const progress = totalDuration > 0 ? Math.min(1, Math.max(0, displayTime / totalDuration)) : 0;
 
   return {
     containerRef,
-    trackRef,
     audioProps,
     availableTracks,
     track,
@@ -222,14 +224,14 @@ export function useWaveformAudio(call: CallMetadata) {
     waveformError,
     loadingWave,
     playing,
-    currentTime,
+    displayTime,
     totalDuration,
     progress,
     speed,
     audioError,
     isUnplayablePruned,
-    setIsScrubbing,
-    seekFromClientX,
+    handleSliderChange,
+    handleSliderCommit,
     togglePlay,
     skip,
     switchTrack,

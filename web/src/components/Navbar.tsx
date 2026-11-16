@@ -1,5 +1,6 @@
 import React from "react";
 import { Cloud, HardDrive, Moon, Radio, RefreshCw, Sun } from "lucide-react";
+import { Button } from "@ui-sdk/react/button";
 import type { StoragePublicView } from "../types";
 
 interface NavbarProps {
@@ -39,7 +40,7 @@ export const Navbar: React.FC<NavbarProps> = ({
       <div className="mx-auto flex h-13 sm:h-14 max-w-5xl items-center justify-between gap-2 px-3 sm:px-6">
         <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
           <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-[var(--ds-btn-primary-bg)] text-[var(--ds-btn-primary-fg)]">
-            <Radio className="h-4 w-4" />
+            <Radio className="h-4 w-4" aria-hidden="true" />
           </div>
           <div className="flex min-w-0 items-center gap-2">
             <span className="truncate text-sm font-semibold tracking-tight">CallTap</span>
@@ -64,10 +65,11 @@ export const Navbar: React.FC<NavbarProps> = ({
             )}
           </div>
 
-          <button
+          <Button
             type="button"
-            onClick={() => !vmSleeping && onOpenStorage()}
-            className={`inline-flex h-9 sm:h-8 items-center gap-1.5 rounded-full border px-2.5 sm:px-3 text-xs font-medium transition cursor-pointer ${
+            disabled={vmSleeping}
+            onClick={onOpenStorage}
+            className={`inline-flex h-9 sm:h-8 items-center gap-1.5 rounded-full border px-2.5 sm:px-3 text-xs font-medium transition ${
               cloudConnected
                 ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/15"
                 : "border-[var(--ds-border)] bg-[var(--ds-surface)] text-[var(--ds-fg-secondary)] hover:border-[var(--ds-border-strong)] hover:text-[var(--ds-fg)]"
@@ -75,33 +77,45 @@ export const Navbar: React.FC<NavbarProps> = ({
             title="Configure cloud storage destination"
           >
             {cloudConnected ? (
-              <Cloud className="h-3.5 w-3.5 shrink-0" />
+              <Cloud className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
             ) : (
-              <HardDrive className="h-3.5 w-3.5 shrink-0" />
+              <HardDrive className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
             )}
             <span className="max-w-[96px] sm:max-w-[160px] truncate">
-              {cloudConnected ? storageView.remote_label : "Local"}
-              <span className="hidden sm:inline">{!cloudConnected && " Only"}</span>
+              {cloudConnected ? (
+                storageView.remote_label
+              ) : (
+                <>
+                  Local <span className="hidden sm:inline">Only</span>
+                </>
+              )}{" "}
+              <span className="sr-only">storage settings</span>
             </span>
-          </button>
+          </Button>
 
-          <button
+          <Button
             type="button"
             onClick={onRefresh}
-            className="inline-flex h-9 w-9 sm:h-8 sm:w-8 items-center justify-center rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[var(--ds-fg-secondary)] hover:border-[var(--ds-border-strong)] hover:text-[var(--ds-fg)] cursor-pointer"
+            aria-label="Refresh recordings"
+            className="inline-flex h-9 w-9 sm:h-8 sm:w-8 items-center justify-center rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[var(--ds-fg-secondary)] hover:border-[var(--ds-border-strong)] hover:text-[var(--ds-fg)]"
             title="Refresh"
           >
-            <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />
-          </button>
+            <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} aria-hidden="true" />
+          </Button>
 
-          <button
+          <Button
             type="button"
             onClick={onToggleTheme}
-            className="inline-flex h-9 w-9 sm:h-8 sm:w-8 items-center justify-center rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[var(--ds-fg-secondary)] hover:border-[var(--ds-border-strong)] hover:text-[var(--ds-fg)] cursor-pointer"
+            aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+            className="inline-flex h-9 w-9 sm:h-8 sm:w-8 items-center justify-center rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[var(--ds-fg-secondary)] hover:border-[var(--ds-border-strong)] hover:text-[var(--ds-fg)]"
             title={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
           >
-            {theme === "dark" ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
-          </button>
+            {theme === "dark" ? (
+              <Sun className="h-3.5 w-3.5" aria-hidden="true" />
+            ) : (
+              <Moon className="h-3.5 w-3.5" aria-hidden="true" />
+            )}
+          </Button>
         </div>
       </div>
     </header>

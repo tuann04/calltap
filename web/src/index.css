@@ -1,4 +1,7 @@
+@layer ui-sdk;
+
 @import "tailwindcss";
+@import "@ui-sdk/core/web.css" layer(components);
 
 @font-face {
   font-family: "Geist";
@@ -17,6 +20,7 @@
 }
 
 :root {
+  color-scheme: light;
   --ds-bg: #ffffff;
   --ds-surface: #fafafa;
   --ds-card: #ffffff;
@@ -32,9 +36,27 @@
   --ds-accent: #0070f3;
   --ds-you: #10b981;
   --ds-agent: #6366f1;
+
+  --ui-background: var(--ds-card);
+  --ui-foreground: var(--ds-fg);
+  --ui-muted: var(--ds-muted);
+  --ui-muted-foreground: #52525b;
+  --ui-border: var(--ds-border);
+  --ui-input: #71717a;
+  --ui-primary: var(--ds-btn-primary-bg);
+  --ui-primary-foreground: var(--ds-btn-primary-fg);
+  --ui-destructive: #dc2626;
+  --ui-ring: #71717a;
+  --ui-ring-border: #3f3f46;
+  --ui-overlay: rgb(0 0 0 / 0.65);
+  --ui-radius: 0.375rem;
+  --ui-font-size: 0.75rem;
+  --ui-font-sans: "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --ui-font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 html.dark {
+  color-scheme: dark;
   --ds-bg: #000000;
   --ds-surface: #0a0a0a;
   --ds-card: #0f0f10;
@@ -50,6 +72,19 @@ html.dark {
   --ds-accent: #3291ff;
   --ds-you: #10b981;
   --ds-agent: #818cf8;
+
+  --ui-background: var(--ds-card);
+  --ui-foreground: var(--ds-fg);
+  --ui-muted: var(--ds-muted);
+  --ui-muted-foreground: #a1a1aa;
+  --ui-border: var(--ds-border);
+  --ui-input: #71717a;
+  --ui-primary: var(--ds-btn-primary-bg);
+  --ui-primary-foreground: var(--ds-btn-primary-fg);
+  --ui-destructive: #f87171;
+  --ui-ring: #71717a;
+  --ui-ring-border: #a1a1aa;
+  --ui-overlay: rgb(0 0 0 / 0.75);
 }
 
 * {
@@ -61,7 +96,7 @@ html {
   padding: 0;
   background-color: var(--ds-bg);
   color: var(--ds-fg);
-  font-family: "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: var(--ui-font-sans);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -79,7 +114,7 @@ body {
 code,
 pre,
 .font-mono {
-  font-family: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--ui-font-mono);
 }
 
 ::selection {
@@ -95,8 +130,109 @@ pre,
   display: none;
 }
 
-/* Prevent iOS Safari/Edge auto-zoom when focusing form fields */
+/* Pending toggles inside Button */
+[data-slot="button"] [data-show="pending"] {
+  display: none;
+}
+
+[data-slot="button"][data-pending] [data-show="pending"] {
+  display: inline-flex;
+}
+
+[data-slot="button"][data-pending] [data-show="idle"] {
+  display: none;
+}
+
+/* Dialog & AlertDialog entry/exit transitions */
+[data-slot="dialog-backdrop"],
+[data-slot="alert-dialog-backdrop"] {
+  transition: opacity 0.2s ease;
+
+  &:is([data-starting-style], [data-ending-style]) {
+    opacity: 0;
+  }
+}
+
+[data-slot="alert-dialog-content"],
+[data-slot="dialog-content"]:not([data-presentation="sheet"]) {
+  transition:
+    opacity 0.2s ease,
+    translate 0.22s cubic-bezier(0.22, 1, 0.36, 1),
+    scale 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+
+  &:is([data-starting-style], [data-ending-style]) {
+    opacity: 0;
+    translate: 0 12px;
+    scale: 0.97;
+  }
+
+  &[data-ending-style] {
+    transition-duration: 0.14s;
+  }
+}
+
+[data-slot="dialog-content"][data-presentation="sheet"] {
+  inset: auto 0 0 0;
+  margin-inline: auto;
+  width: 100%;
+  max-width: 36rem;
+  max-height: 92dvh;
+  padding: 0;
+  border-radius: 1rem 1rem 0 0;
+  transition:
+    opacity 0.2s ease,
+    transform 0.24s cubic-bezier(0.22, 1, 0.36, 1);
+
+  &:is([data-starting-style], [data-ending-style]) {
+    opacity: 0;
+    transform: translateY(100%);
+  }
+}
+
+/* Waveform scrubber overrides default 4px slider rail */
+.waveform-slider {
+  min-width: 0;
+}
+
+.waveform-slider [data-slot="slider-control"] {
+  height: auto;
+  width: 100%;
+}
+
+.waveform-slider [data-slot="slider-track"] {
+  height: auto;
+  width: 100%;
+  border-radius: 0;
+  background: transparent;
+}
+
+.waveform-slider [data-slot="slider-thumb"] {
+  width: 1.5px;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  background: var(--ds-fg);
+  pointer-events: none;
+}
+
+.waveform-slider[data-dual] [data-slot="slider-thumb"] {
+  box-shadow: 0 0 6px rgb(255 255 255 / 0.4);
+}
+
+.waveform-slider [data-slot="slider-thumb"]:has(:focus-visible) {
+  outline: 2px solid var(--ui-ring);
+  outline-offset: 2px;
+}
+
+.waveform-slider[data-disabled] [data-slot="slider-thumb"] {
+  opacity: 0;
+}
+
 @media (max-width: 639px) {
+  .toast-region-offset[data-side="bottom"] {
+    bottom: 4.75rem;
+  }
+
   input,
   select,
   textarea {

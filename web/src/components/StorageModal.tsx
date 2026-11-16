@@ -1,7 +1,19 @@
 import React, { useEffect, useState } from "react";
 import { CheckCircle2, Cloud, CloudOff, HardDrive, Loader2, X, XCircle } from "lucide-react";
+import { Button } from "@ui-sdk/react/button";
+import {
+  Dialog,
+  DialogBackdrop,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from "@ui-sdk/react/dialog";
+import { Field, FieldDescription, FieldLabel } from "@ui-sdk/react/field";
+import { Radio, RadioGroup, RadioIndicator } from "@ui-sdk/react/radio";
+import { Switch, SwitchThumb } from "@ui-sdk/react/switch";
 import { api } from "../api";
-import type { StorageConfigPayload, StoragePublicView } from "../types";
+import type { StorageConfigPayload, StorageProvider, StoragePublicView } from "../types";
 import { GDriveFields, S3Fields, STORAGE_PROVIDERS } from "./StorageFormFields";
 
 interface StorageModalProps {
@@ -51,9 +63,7 @@ export const StorageModal: React.FC<StorageModalProps> = ({
   onSaved,
 }) => {
   const [form, setForm] = useState<StorageConfigPayload>(() => initialFormState(storage));
-  const [testing, setTesting] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [disconnecting, setDisconnecting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -64,21 +74,16 @@ export const StorageModal: React.FC<StorageModalProps> = ({
     setError(null);
   }, [open, storage]);
 
-  if (!open) return null;
-
   const patchForm = (patch: Partial<StorageConfigPayload>) =>
     setForm((prev) => ({ ...prev, ...patch }));
 
   const handleTest = async () => {
-    setTesting(true);
     setError(null);
     setTestResult(null);
     try {
       setTestResult(await api.testStorage(trimmedPayload(form)));
     } catch (err) {
       setTestResult({ ok: false, message: err instanceof Error ? err.message : "Test failed" });
-    } finally {
-      setTesting(false);
     }
   };
 
@@ -101,7 +106,6 @@ export const StorageModal: React.FC<StorageModalProps> = ({
   };
 
   const handleDisconnect = async () => {
-    setDisconnecting(true);
     setError(null);
     try {
       const updated = await api.disconnectStorage();
@@ -109,8 +113,6 @@ export const StorageModal: React.FC<StorageModalProps> = ({
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to disconnect");
-    } finally {
-      setDisconnecting(false);
     }
   };
 
@@ -120,80 +122,85 @@ export const StorageModal: React.FC<StorageModalProps> = ({
     form.provider === "b2" ||
     form.provider === "custom_s3";
 
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/70 p-0 sm:p-4 backdrop-blur-xs"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div className="flex max-h-[92dvh] sm:max-h-[90vh] w-full max-w-xl flex-col overflow-hidden rounded-t-2xl sm:rounded-xl border border-[var(--ds-border)] bg-[var(--ds-card)] shadow-2xl">
-        <div className="flex justify-center pt-2.5 sm:hidden">
-          <div className="h-1 w-10 rounded-full bg-[var(--ds-border-strong)]" />
-        </div>
+  const selectedProvider: StorageProvider =
+    form.provider === "b2" ? "custom_s3" : form.provider;
 
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) onClose();
+      }}
+      presentation="auto"
+    >
+      <DialogBackdrop className="backdrop-blur-xs" />
+      <DialogContent className="w-[min(36rem,calc(100%-2rem))] max-h-[90dvh] gap-0 overflow-hidden rounded-t-2xl sm:rounded-xl border border-[var(--ds-border)] bg-[var(--ds-card)] p-0 shadow-2xl">
         <div className="flex shrink-0 items-center justify-between border-b border-[var(--ds-border)] px-4 sm:px-5 py-3.5 sm:py-4">
           <div className="flex min-w-0 items-center gap-2.5">
             <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)]">
-              <Cloud className="h-4 w-4 text-[var(--ds-fg)]" />
+              <Cloud className="h-4 w-4 text-[var(--ds-fg)]" aria-hidden="true" />
             </div>
             <div className="min-w-0">
-              <h2 className="text-sm font-semibold text-[var(--ds-fg)]">Cloud Storage</h2>
-              <p className="truncate text-xs text-[var(--ds-fg-muted)]">
+              <DialogTitle className="text-sm font-semibold text-[var(--ds-fg)]">
+                Cloud Storage
+              </DialogTitle>
+              <DialogDescription className="truncate text-xs text-[var(--ds-fg-muted)]">
                 Optional — leave disconnected to save locally only
-              </p>
+              </DialogDescription>
             </div>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-[var(--ds-fg-muted)] hover:bg-[var(--ds-muted)] hover:text-[var(--ds-fg)] cursor-pointer"
+
+          <DialogClose
+            aria-label="Close cloud storage settings"
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border-0 bg-transparent text-[var(--ds-fg-muted)] hover:bg-[var(--ds-muted)] hover:text-[var(--ds-fg)]"
           >
-            <X className="h-4 w-4" />
-          </button>
+            <X className="h-4 w-4" aria-hidden="true" />
+          </DialogClose>
         </div>
 
         <form onSubmit={handleSave} className="flex min-h-0 flex-1 flex-col">
           <div className="flex-1 space-y-4 overflow-y-auto overscroll-contain p-4 sm:p-5">
-            <div>
-              <label className="mb-2 block text-xs font-medium text-[var(--ds-fg-secondary)]">
+            <Field>
+              <FieldLabel className="text-xs font-medium text-[var(--ds-fg-secondary)]">
                 Destination
-              </label>
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                {STORAGE_PROVIDERS.map((p) => {
-                  const active =
-                    form.provider === p.id || (p.id === "custom_s3" && form.provider === "b2");
-                  return (
-                    <button
-                      key={p.id}
-                      type="button"
-                      onClick={() => {
-                        patchForm({
-                          provider: p.id,
-                          region: p.id === "r2" && !form.region ? "auto" : form.region,
-                        });
-                        setTestResult(null);
-                        setError(null);
-                      }}
-                      className={`flex flex-col items-start rounded-lg border px-3 py-2.5 sm:py-2 text-left transition cursor-pointer ${
-                        active
-                          ? "border-[var(--ds-fg)] bg-[var(--ds-muted)]"
-                          : "border-[var(--ds-border)] bg-[var(--ds-surface)] hover:border-[var(--ds-border-strong)]"
-                      }`}
-                    >
-                      <span className="text-xs font-medium text-[var(--ds-fg)]">{p.label}</span>
-                      <span className="mt-0.5 line-clamp-1 text-[10px] text-[var(--ds-fg-muted)]">
+              </FieldLabel>
+              <RadioGroup
+                value={selectedProvider}
+                onValueChange={(next) => {
+                  if (!next) return;
+                  patchForm({
+                    provider: next,
+                    region: next === "r2" && !form.region ? "auto" : form.region,
+                  });
+                  setTestResult(null);
+                  setError(null);
+                }}
+                className="grid grid-cols-2 gap-2 sm:grid-cols-3"
+              >
+                {STORAGE_PROVIDERS.map((p) => (
+                  <Field
+                    key={p.id}
+                    className="flex-row items-start gap-2 rounded-lg border border-[var(--ds-border)] bg-[var(--ds-surface)] px-3 py-2.5 sm:py-2 transition hover:border-[var(--ds-border-strong)] has-data-checked:border-[var(--ds-fg)] has-data-checked:bg-[var(--ds-muted)]"
+                  >
+                    <Radio value={p.id} className="mt-0.5 shrink-0">
+                      <RadioIndicator />
+                    </Radio>
+                    <div className="min-w-0 flex-1">
+                      <FieldLabel className="cursor-pointer text-xs font-medium text-[var(--ds-fg)]">
+                        {p.label}
+                      </FieldLabel>
+                      <FieldDescription className="mt-0.5 line-clamp-1 text-[10px]">
                         {p.hint}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
+                      </FieldDescription>
+                    </div>
+                  </Field>
+                ))}
+              </RadioGroup>
+            </Field>
 
             {form.provider === "none" ? (
               <div className="flex items-start gap-3 rounded-lg border border-[var(--ds-border)] bg-[var(--ds-surface)] p-3.5 text-xs text-[var(--ds-fg-secondary)]">
-                <HardDrive className="mt-0.5 h-4 w-4 shrink-0 text-[var(--ds-fg-muted)]" />
+                <HardDrive className="mt-0.5 h-4 w-4 shrink-0 text-[var(--ds-fg-muted)]" aria-hidden="true" />
                 <div>
                   <p className="font-medium text-[var(--ds-fg)]">Local-only mode</p>
                   <p className="mt-1 text-[var(--ds-fg-muted)]">
@@ -210,26 +217,28 @@ export const StorageModal: React.FC<StorageModalProps> = ({
             )}
 
             {form.provider !== "none" && (
-              <label className="flex cursor-pointer items-center justify-between gap-3 rounded-lg border border-[var(--ds-border)] bg-[var(--ds-surface)] px-3.5 py-3 sm:py-2.5">
-                <div>
-                  <span className="block text-xs font-medium text-[var(--ds-fg)]">
+              <Field className="flex-row items-center justify-between gap-3 rounded-lg border border-[var(--ds-border)] bg-[var(--ds-surface)] px-3.5 py-3 sm:py-2.5">
+                <div className="min-w-0 flex-1">
+                  <FieldLabel className="cursor-pointer text-xs font-medium text-[var(--ds-fg)]">
                     Auto-upload when calls finish
-                  </span>
-                  <span className="block text-[11px] text-[var(--ds-fg-muted)]">
+                  </FieldLabel>
+                  <FieldDescription className="text-[11px]">
                     Turn off to upload only the recordings you select manually
-                  </span>
+                  </FieldDescription>
                 </div>
-                <input
-                  type="checkbox"
+                <Switch
                   checked={form.auto_upload}
-                  onChange={(e) => patchForm({ auto_upload: e.target.checked })}
-                  className="h-5 w-5 sm:h-4 sm:w-4 shrink-0 accent-[var(--ds-accent)] cursor-pointer"
-                />
-              </label>
+                  onCheckedChange={(auto_upload) => patchForm({ auto_upload })}
+                  className="shrink-0"
+                >
+                  <SwitchThumb />
+                </Switch>
+              </Field>
             )}
 
             {testResult && (
               <div
+                role="status"
                 className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-xs ${
                   testResult.ok
                     ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
@@ -237,16 +246,19 @@ export const StorageModal: React.FC<StorageModalProps> = ({
                 }`}
               >
                 {testResult.ok ? (
-                  <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                 ) : (
-                  <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                 )}
                 <span className="break-all">{testResult.message}</span>
               </div>
             )}
 
             {error && (
-              <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+              <div
+                role="alert"
+                className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400"
+              >
                 {error}
               </div>
             )}
@@ -255,42 +267,47 @@ export const StorageModal: React.FC<StorageModalProps> = ({
           <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-[var(--ds-border)] bg-[var(--ds-card)] px-4 sm:px-5 pt-3 pb-[max(1rem,env(safe-area-inset-bottom))] sm:py-4">
             <div className="flex items-center gap-2">
               {storage.connected && storage.source === "ui" && (
-                <button
+                <Button
                   type="button"
-                  disabled={disconnecting}
+                  pendingAnnouncement="Disconnecting cloud storage"
+                  data-agent-confirm="Disconnects cloud storage and switches CallTap to local-only saving"
                   onClick={handleDisconnect}
-                  className="inline-flex h-10 sm:h-8 items-center gap-1.5 rounded-md border border-red-500/30 bg-red-500/10 px-3 text-xs font-medium text-red-400 hover:bg-red-500/20 disabled:opacity-50 cursor-pointer"
+                  className="inline-flex h-10 sm:h-8 items-center gap-1.5 rounded-md border border-red-500/30 bg-red-500/10 px-3 text-xs font-medium text-red-400 hover:bg-red-500/20"
                 >
-                  <CloudOff className="h-3.5 w-3.5" />
-                  <span>{disconnecting ? "Disconnecting…" : "Disconnect"}</span>
-                </button>
+                  <CloudOff className="h-3.5 w-3.5" data-show="idle" aria-hidden="true" />
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" data-show="pending" aria-hidden="true" />
+                  <span data-show="idle">Disconnect</span>
+                  <span data-show="pending" aria-hidden="true">Disconnecting…</span>
+                </Button>
               )}
             </div>
 
             <div className="flex flex-1 sm:flex-initial items-center justify-end gap-2">
               {form.provider !== "none" && (
-                <button
+                <Button
                   type="button"
-                  disabled={testing}
+                  pendingAnnouncement="Testing storage connection"
                   onClick={handleTest}
-                  className="inline-flex h-10 sm:h-8 items-center gap-1.5 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-3 text-xs font-medium text-[var(--ds-fg)] hover:border-[var(--ds-border-strong)] disabled:opacity-50 cursor-pointer"
+                  className="inline-flex h-10 sm:h-8 items-center gap-1.5 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-3 text-xs font-medium text-[var(--ds-fg)] hover:border-[var(--ds-border-strong)]"
                 >
-                  {testing && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" data-show="pending" aria-hidden="true" />
                   <span>Test Connection</span>
-                </button>
+                </Button>
               )}
-              <button
+
+              <Button
                 type="submit"
+                data-variant="solid"
                 disabled={saving}
-                className="inline-flex h-10 sm:h-8 items-center gap-1.5 rounded-md bg-[var(--ds-btn-primary-bg)] px-4 sm:px-3.5 text-xs font-medium text-[var(--ds-btn-primary-fg)] hover:bg-[var(--ds-btn-primary-hover)] disabled:opacity-50 cursor-pointer"
+                className="inline-flex h-10 sm:h-8 items-center gap-1.5 rounded-md border-0 bg-[var(--ds-btn-primary-bg)] px-4 sm:px-3.5 text-xs font-medium text-[var(--ds-btn-primary-fg)] hover:bg-[var(--ds-btn-primary-hover)]"
               >
-                {saving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                {saving && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />}
                 <span>{form.provider === "none" ? "Use Local Only" : "Save Storage"}</span>
-              </button>
+              </Button>
             </div>
           </div>
         </form>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 };

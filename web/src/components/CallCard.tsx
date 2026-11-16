@@ -12,6 +12,10 @@ import {
   Upload,
   X,
 } from "lucide-react";
+import { Button } from "@ui-sdk/react/button";
+import { Checkbox, CheckboxIndicator } from "@ui-sdk/react/checkbox";
+import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "@ui-sdk/react/collapsible";
+import { Input } from "@ui-sdk/react/input";
 import { api } from "../api";
 import type { CallMetadata, UploadStatus } from "../types";
 import {
@@ -21,6 +25,7 @@ import {
   formatServiceLabel,
   formatStartedAt,
 } from "../utils/callDisplay";
+import type { NotifyFn } from "./AppToastRegion";
 import { CallNotesDrawer } from "./CallNotesDrawer";
 import { WaveformPlayer } from "./WaveformPlayer";
 
@@ -31,7 +36,7 @@ interface CallCardProps {
   onToggleSelect: (callId: string) => void;
   onUpdated: (updated: CallMetadata) => void;
   onRequestDelete: (call: CallMetadata) => void;
-  onNotify: (msg: string, tone?: "ok" | "err") => void;
+  onNotify: NotifyFn;
 }
 
 const UPLOAD_BADGE_CONFIG: Record<
@@ -76,9 +81,9 @@ const UploadBadge: React.FC<{ call: CallMetadata }> = ({ call }) => {
       title={title}
       className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium ${cfg.className}`}
     >
-      {cfg.icon === "cloud" && <Cloud className="h-3 w-3" />}
-      {cfg.icon === "spinner" && <Loader2 className="h-3 w-3 animate-spin" />}
-      {cfg.icon === "off" && <CloudOff className="h-3 w-3" />}
+      {cfg.icon === "cloud" && <Cloud className="h-3 w-3" aria-hidden="true" />}
+      {cfg.icon === "spinner" && <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />}
+      {cfg.icon === "off" && <CloudOff className="h-3 w-3" aria-hidden="true" />}
       <span>{cfg.label}</span>
     </span>
   );
@@ -97,7 +102,6 @@ export const CallCard: React.FC<CallCardProps> = ({
   const [titleDraft, setTitleDraft] = useState(call.title);
   const [savingTitle, setSavingTitle] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
     if (!editingTitle) setTitleDraft(call.title);
@@ -123,15 +127,12 @@ export const CallCard: React.FC<CallCardProps> = ({
   };
 
   const handleUpload = async () => {
-    setUploading(true);
     try {
       const updated = await api.uploadCall(call.call_id);
       onUpdated(updated);
       onNotify("Queued upload to cloud storage");
     } catch (err) {
       onNotify(err instanceof Error ? err.message : "Upload failed", "err");
-    } finally {
-      setUploading(false);
     }
   };
 
@@ -153,175 +154,191 @@ export const CallCard: React.FC<CallCardProps> = ({
           : "border-[var(--ds-border)] bg-[var(--ds-card)] hover:border-[var(--ds-border-strong)]"
       } p-3.5 sm:p-4`}
     >
-      <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex min-w-0 flex-1 items-start gap-3">
-          <input
-            type="checkbox"
-            checked={selected}
-            disabled={call.status === "recording"}
-            onChange={() => onToggleSelect(call.call_id)}
-            aria-label={`Select ${displayTitle}`}
-            className="mt-0.5 sm:mt-1 h-5 w-5 sm:h-4 sm:w-4 shrink-0 rounded accent-[var(--ds-fg)] cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
-          />
+      <Collapsible open={detailsOpen} onOpenChange={setDetailsOpen}>
+        <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex min-w-0 flex-1 items-start gap-3">
+            <Checkbox
+              checked={selected}
+              disabled={call.status === "recording"}
+              onCheckedChange={() => onToggleSelect(call.call_id)}
+              aria-label={`Select ${displayTitle}`}
+              className="mt-0.5 sm:mt-1 shrink-0"
+            >
+              <CheckboxIndicator>
+                <Check className="h-3.5 w-3.5" aria-hidden="true" />
+              </CheckboxIndicator>
+            </Checkbox>
 
-          <div className="min-w-0 flex-1">
-            {editingTitle ? (
-              <div className="flex items-center gap-1.5">
-                <input
-                  type="text"
-                  autoFocus
-                  value={titleDraft}
-                  placeholder={displayTitle}
-                  onChange={(e) => setTitleDraft(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      saveTitle();
-                    } else if (e.key === "Escape") {
+            <div className="min-w-0 flex-1">
+              {editingTitle ? (
+                <div className="flex items-center gap-1.5">
+                  <Input
+                    type="text"
+                    autoFocus
+                    aria-label={`Title for ${displayTitle}`}
+                    value={titleDraft}
+                    placeholder={displayTitle}
+                    onValueChange={setTitleDraft}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        saveTitle();
+                      } else if (e.key === "Escape") {
+                        setTitleDraft(call.title);
+                        setEditingTitle(false);
+                      }
+                    }}
+                    className="h-9 sm:h-7 min-w-0 flex-1 max-w-sm border-[var(--ds-border-strong)] bg-[var(--ds-surface)] px-2.5 text-sm font-medium text-[var(--ds-fg)]"
+                  />
+                  <Button
+                    type="button"
+                    data-variant="solid"
+                    disabled={savingTitle}
+                    onClick={saveTitle}
+                    aria-label={`Save title for ${displayTitle}`}
+                    className="inline-flex h-9 w-9 sm:h-7 sm:w-7 shrink-0 items-center justify-center rounded-md border-0 bg-[var(--ds-btn-primary-bg)] text-[var(--ds-btn-primary-fg)] hover:bg-[var(--ds-btn-primary-hover)]"
+                    title="Save title"
+                  >
+                    {savingTitle ? (
+                      <Loader2 className="h-4 w-4 sm:h-3.5 sm:w-3.5 animate-spin" aria-hidden="true" />
+                    ) : (
+                      <Check className="h-4 w-4 sm:h-3.5 sm:w-3.5" aria-hidden="true" />
+                    )}
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={() => {
                       setTitleDraft(call.title);
                       setEditingTitle(false);
-                    }
-                  }}
-                  className="h-9 sm:h-7 min-w-0 flex-1 max-w-sm rounded-md border border-[var(--ds-border-strong)] bg-[var(--ds-surface)] px-2.5 text-sm font-medium text-[var(--ds-fg)] focus:border-[var(--ds-fg)] focus:outline-none"
-                />
-                <button
-                  type="button"
-                  disabled={savingTitle}
-                  onClick={saveTitle}
-                  className="inline-flex h-9 w-9 sm:h-7 sm:w-7 shrink-0 items-center justify-center rounded-md bg-[var(--ds-btn-primary-bg)] text-[var(--ds-btn-primary-fg)] hover:bg-[var(--ds-btn-primary-hover)] cursor-pointer"
-                  title="Save title"
-                >
-                  {savingTitle ? (
-                    <Loader2 className="h-4 w-4 sm:h-3.5 sm:w-3.5 animate-spin" />
-                  ) : (
-                    <Check className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
-                  )}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setTitleDraft(call.title);
-                    setEditingTitle(false);
-                  }}
-                  className="inline-flex h-9 w-9 sm:h-7 sm:w-7 shrink-0 items-center justify-center rounded-md border border-[var(--ds-border)] text-[var(--ds-fg-muted)] hover:text-[var(--ds-fg)] cursor-pointer"
-                  title="Cancel"
-                >
-                  <X className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
-                </button>
-              </div>
-            ) : (
-              <div className="flex items-center gap-1.5">
-                <h3
-                  onClick={() => setEditingTitle(true)}
-                  className="min-w-0 truncate text-sm font-semibold text-[var(--ds-fg)] cursor-pointer hover:underline decoration-[var(--ds-border-strong)] underline-offset-4"
-                  title="Click to rename"
-                >
-                  {displayTitle}
-                </h3>
-                <button
-                  type="button"
-                  onClick={() => setEditingTitle(true)}
-                  className="inline-flex h-7 w-7 sm:h-6 sm:w-6 shrink-0 items-center justify-center rounded text-[var(--ds-fg-muted)] hover:bg-[var(--ds-muted)] hover:text-[var(--ds-fg)] cursor-pointer"
-                  title="Rename recording"
-                >
-                  <Pencil className="h-3.5 w-3.5 sm:h-3 sm:w-3" />
-                </button>
-              </div>
-            )}
-
-            <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-[var(--ds-fg-muted)]">
-              <span className="rounded bg-[var(--ds-muted)] px-1.5 py-0.5 font-mono text-[11px] font-medium text-[var(--ds-fg-secondary)]">
-                {serviceBadge}
-              </span>
-              {call.page_url && pageHost && (
-                <a
-                  href={call.page_url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex max-w-full items-center gap-1 font-mono text-[11px] text-[var(--ds-fg-secondary)] hover:text-[var(--ds-fg)] hover:underline"
-                  title={call.page_url}
-                >
-                  <span className="max-w-[160px] sm:max-w-[180px] truncate">{pageHost}</span>
-                  <ExternalLink className="h-2.5 w-2.5 shrink-0" />
-                </a>
+                    }}
+                    aria-label={`Cancel renaming ${displayTitle}`}
+                    className="inline-flex h-9 w-9 sm:h-7 sm:w-7 shrink-0 items-center justify-center rounded-md border border-[var(--ds-border)] bg-transparent text-[var(--ds-fg-muted)] hover:text-[var(--ds-fg)]"
+                    title="Cancel"
+                  >
+                    <X className="h-4 w-4 sm:h-3.5 sm:w-3.5" aria-hidden="true" />
+                  </Button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-1.5">
+                  <h3
+                    onClick={() => setEditingTitle(true)}
+                    className="min-w-0 truncate text-sm font-semibold text-[var(--ds-fg)] cursor-pointer hover:underline decoration-[var(--ds-border-strong)] underline-offset-4"
+                    title="Click to rename"
+                  >
+                    {displayTitle}
+                  </h3>
+                  <Button
+                    type="button"
+                    onClick={() => setEditingTitle(true)}
+                    aria-label={`Rename ${displayTitle}`}
+                    className="inline-flex h-7 w-7 sm:h-6 sm:w-6 shrink-0 items-center justify-center rounded border-0 bg-transparent text-[var(--ds-fg-muted)] hover:bg-[var(--ds-muted)] hover:text-[var(--ds-fg)]"
+                    title="Rename recording"
+                  >
+                    <Pencil className="h-3.5 w-3.5 sm:h-3 sm:w-3" aria-hidden="true" />
+                  </Button>
+                </div>
               )}
-              <span>{formatStartedAt(call.started_at)}</span>
-              <span className="font-mono tabular-nums">{formatDuration(call.duration_seconds)}</span>
-              {call.tags.map((tag) => (
-                <span
-                  key={tag}
-                  className="rounded-full border border-[var(--ds-border)] px-2 py-0.5 text-[10px] text-[var(--ds-fg-secondary)]"
-                >
-                  #{tag}
+
+              <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-[var(--ds-fg-muted)]">
+                <span className="rounded bg-[var(--ds-muted)] px-1.5 py-0.5 font-mono text-[11px] font-medium text-[var(--ds-fg-secondary)]">
+                  {serviceBadge}
                 </span>
-              ))}
+                {call.page_url && pageHost && (
+                  <a
+                    href={call.page_url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex max-w-full items-center gap-1 font-mono text-[11px] text-[var(--ds-fg-secondary)] hover:text-[var(--ds-fg)] hover:underline"
+                    title={call.page_url}
+                  >
+                    <span className="max-w-[160px] sm:max-w-[180px] truncate">{pageHost}</span>
+                    <ExternalLink className="h-2.5 w-2.5 shrink-0" aria-hidden="true" />
+                  </a>
+                )}
+                <span>{formatStartedAt(call.started_at)}</span>
+                <span className="font-mono tabular-nums">{formatDuration(call.duration_seconds)}</span>
+                {call.tags.map((tag) => (
+                  <span
+                    key={tag}
+                    className="rounded-full border border-[var(--ds-border)] px-2 py-0.5 text-[10px] text-[var(--ds-fg-secondary)]"
+                  >
+                    #{tag}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-2 sm:justify-end">
+            <div className="flex items-center gap-2">
+              {call.status === "recording" && (
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-red-500/40 bg-red-500/10 px-2.5 py-0.5 text-[11px] font-medium text-red-500">
+                  <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
+                  Recording
+                </span>
+              )}
+              <UploadBadge call={call} />
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              {canUpload && (
+                <Button
+                  type="button"
+                  pendingAnnouncement={`Uploading ${displayTitle}`}
+                  onClick={handleUpload}
+                  className="inline-flex h-8 sm:h-7 items-center gap-1 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2.5 text-xs sm:text-[11px] font-medium text-[var(--ds-fg)] hover:border-[var(--ds-border-strong)]"
+                  title="Upload this recording to connected cloud storage"
+                >
+                  <Upload className="h-3 w-3" data-show="idle" aria-hidden="true" />
+                  <Loader2 className="h-3 w-3 animate-spin" data-show="pending" aria-hidden="true" />
+                  <span>
+                    {call.upload_status === "failed" ? "Retry upload" : "Upload recording"}{" "}
+                    <span className="sr-only">{displayTitle}</span>
+                  </span>
+                </Button>
+              )}
+
+              <CollapsibleTrigger className="inline-flex h-8 sm:h-7 items-center gap-1 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2.5 sm:px-2 text-xs sm:text-[11px] text-[var(--ds-fg-secondary)] hover:border-[var(--ds-border-strong)] hover:text-[var(--ds-fg)]">
+                {(state) => (
+                  <>
+                    <span>
+                      Notes <span className="sr-only">for {displayTitle}</span>
+                    </span>
+                    {state.open ? (
+                      <ChevronUp className="h-3 w-3" aria-hidden="true" />
+                    ) : (
+                      <ChevronDown className="h-3 w-3" aria-hidden="true" />
+                    )}
+                  </>
+                )}
+              </CollapsibleTrigger>
+
+              <Button
+                type="button"
+                disabled={call.status === "recording"}
+                onClick={() => onRequestDelete(call)}
+                aria-label={`Delete ${displayTitle}`}
+                className="inline-flex h-8 w-8 sm:h-7 sm:w-7 items-center justify-center rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[var(--ds-fg-muted)] hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-400"
+                title="Delete recording"
+              >
+                <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+              </Button>
             </div>
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-2 sm:justify-end">
-          <div className="flex items-center gap-2">
-            {call.status === "recording" && (
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-red-500/40 bg-red-500/10 px-2.5 py-0.5 text-[11px] font-medium text-red-500">
-                <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
-                Recording
-              </span>
-            )}
-            <UploadBadge call={call} />
+        {call.upload_status === "failed" && call.upload_error && (
+          <div className="mb-3 break-words rounded-md border border-red-500/30 bg-red-500/10 px-3 py-1.5 font-mono text-[11px] text-red-400">
+            {call.upload_error}
           </div>
+        )}
 
-          <div className="flex items-center gap-1.5">
-            {canUpload && (
-              <button
-                type="button"
-                disabled={uploading}
-                onClick={handleUpload}
-                className="inline-flex h-8 sm:h-7 items-center gap-1 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2.5 text-xs sm:text-[11px] font-medium text-[var(--ds-fg)] hover:border-[var(--ds-border-strong)] disabled:opacity-50 cursor-pointer"
-                title="Upload this recording to connected cloud storage"
-              >
-                {uploading ? (
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                ) : (
-                  <Upload className="h-3 w-3" />
-                )}
-                <span>{call.upload_status === "failed" ? "Retry" : "Upload"}</span>
-              </button>
-            )}
+        <WaveformPlayer call={call} />
 
-            <button
-              type="button"
-              onClick={() => setDetailsOpen((v) => !v)}
-              className="inline-flex h-8 sm:h-7 items-center gap-1 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-2.5 sm:px-2 text-xs sm:text-[11px] text-[var(--ds-fg-secondary)] hover:border-[var(--ds-border-strong)] hover:text-[var(--ds-fg)] cursor-pointer"
-              title="Edit notes and tags"
-            >
-              <span>Notes</span>
-              {detailsOpen ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-            </button>
-
-            <button
-              type="button"
-              disabled={call.status === "recording"}
-              onClick={() => onRequestDelete(call)}
-              className="inline-flex h-8 w-8 sm:h-7 sm:w-7 items-center justify-center rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] text-[var(--ds-fg-muted)] hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-400 disabled:cursor-not-allowed disabled:opacity-40 cursor-pointer"
-              title="Delete recording"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {call.upload_status === "failed" && call.upload_error && (
-        <div className="mb-3 break-words rounded-md border border-red-500/30 bg-red-500/10 px-3 py-1.5 font-mono text-[11px] text-red-400">
-          {call.upload_error}
-        </div>
-      )}
-
-      <WaveformPlayer call={call} />
-
-      {detailsOpen && (
-        <CallNotesDrawer call={call} onUpdated={onUpdated} onNotify={onNotify} />
-      )}
+        <CollapsiblePanel>
+          <CallNotesDrawer call={call} onUpdated={onUpdated} onNotify={onNotify} />
+        </CollapsiblePanel>
+      </Collapsible>
     </article>
   );
 };

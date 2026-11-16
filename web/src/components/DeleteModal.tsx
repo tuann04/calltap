@@ -1,5 +1,15 @@
-import React, { useEffect, useState } from "react";
-import { AlertTriangle, Loader2, Trash2, X } from "lucide-react";
+import React, { useState } from "react";
+import { AlertTriangle, Check, Loader2, Trash2, X } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogBackdrop,
+  AlertDialogClose,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogTitle,
+} from "@ui-sdk/react/alert-dialog";
+import { Checkbox, CheckboxIndicator } from "@ui-sdk/react/checkbox";
+import { Field, FieldDescription, FieldLabel } from "@ui-sdk/react/field";
 import type { CallMetadata } from "../types";
 import { formatCallTitle } from "../utils/callDisplay";
 
@@ -17,122 +27,121 @@ export const DeleteModal: React.FC<DeleteModalProps> = ({
   onConfirm,
 }) => {
   const [deleteRemote, setDeleteRemote] = useState(false);
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    setDeleteRemote(false);
-    setBusy(false);
-    setError(null);
-  }, [targets]);
-
-  if (targets.length === 0) return null;
-
+  const open = targets.length > 0;
   const hasRemoteCopies = targets.some((c) => Boolean(c.remote_uri));
   const isSingle = targets.length === 1;
   const label = isSingle
     ? formatCallTitle(targets[0])
     : `${targets.length} selected recordings`;
 
-  const handleConfirm = async () => {
-    setBusy(true);
-    setError(null);
-    try {
-      await onConfirm(deleteRemote);
-      onClose();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Delete failed");
-      setBusy(false);
-    }
-  };
-
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/70 p-0 sm:p-4 backdrop-blur-xs"
-      onClick={(e) => {
-        if (e.target === e.currentTarget && !busy) onClose();
+    <AlertDialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) onClose();
       }}
+      onOpenChangeComplete={(next) => {
+        if (!next) {
+          setDeleteRemote(false);
+          setError(null);
+        }
+      }}
+      pendingAnnouncement="Deleting recordings"
     >
-      <div className="w-full max-w-md overflow-hidden rounded-t-2xl sm:rounded-xl border border-[var(--ds-border)] bg-[var(--ds-card)] shadow-2xl">
-        <div className="flex justify-center pt-2.5 sm:hidden">
-          <div className="h-1 w-10 rounded-full bg-[var(--ds-border-strong)]" />
-        </div>
-
+      <AlertDialogBackdrop className="backdrop-blur-xs" />
+      <AlertDialogContent className="w-[min(28rem,calc(100%-2rem))] gap-0 overflow-hidden rounded-t-2xl sm:rounded-xl border border-[var(--ds-border)] bg-[var(--ds-card)] p-0 shadow-2xl">
         <div className="flex items-center justify-between border-b border-[var(--ds-border)] px-4 sm:px-5 py-3.5 sm:py-4">
           <div className="flex items-center gap-2.5">
             <div className="flex h-8 w-8 items-center justify-center rounded-md border border-red-500/30 bg-red-500/10 text-red-500">
-              <AlertTriangle className="h-4 w-4" />
+              <AlertTriangle className="h-4 w-4" aria-hidden="true" />
             </div>
-            <h2 className="text-sm font-semibold text-[var(--ds-fg)]">
+            <AlertDialogTitle className="text-sm font-semibold text-[var(--ds-fg)]">
               Delete {isSingle ? "Recording" : `${targets.length} Recordings`}
-            </h2>
+            </AlertDialogTitle>
           </div>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={onClose}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[var(--ds-fg-muted)] hover:bg-[var(--ds-muted)] hover:text-[var(--ds-fg)] cursor-pointer"
+
+          <AlertDialogClose
+            aria-label="Close delete dialog"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-md border-0 bg-transparent text-[var(--ds-fg-muted)] hover:bg-[var(--ds-muted)] hover:text-[var(--ds-fg)]"
           >
-            <X className="h-4 w-4" />
-          </button>
+            <X className="h-4 w-4" aria-hidden="true" />
+          </AlertDialogClose>
         </div>
 
         <div className="space-y-4 px-4 sm:px-5 pt-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] sm:py-5 text-xs text-[var(--ds-fg-secondary)]">
-          <p className="break-words">
-            This permanently deletes <span className="font-medium text-[var(--ds-fg)]">{label}</span>{" "}
-            and all local FLAC/Opus/waveform files from this machine.
-          </p>
+          <AlertDialogDescription className="break-words text-xs text-[var(--ds-fg-secondary)]">
+            This permanently deletes{" "}
+            <span className="font-medium text-[var(--ds-fg)]">{label}</span> and all local
+            FLAC/Opus/waveform files from this machine.
+          </AlertDialogDescription>
 
           {hasRemoteCopies && cloudConnected && (
-            <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-[var(--ds-border)] bg-[var(--ds-surface)] p-3">
-              <input
-                type="checkbox"
+            <Field className="flex-row items-start gap-3 rounded-lg border border-[var(--ds-border)] bg-[var(--ds-surface)] p-3">
+              <Checkbox
                 checked={deleteRemote}
-                onChange={(e) => setDeleteRemote(e.target.checked)}
-                className="mt-0.5 h-5 w-5 sm:h-3.5 sm:w-3.5 shrink-0 accent-red-500 cursor-pointer"
-              />
-              <div>
-                <span className="block font-medium text-[var(--ds-fg)]">
+                onCheckedChange={(checked) => setDeleteRemote(checked === true)}
+                className="mt-0.5 shrink-0"
+              >
+                <CheckboxIndicator>
+                  <Check className="h-3.5 w-3.5" aria-hidden="true" />
+                </CheckboxIndicator>
+              </Checkbox>
+              <div className="min-w-0 flex-1">
+                <FieldLabel className="cursor-pointer font-medium text-[var(--ds-fg)]">
                   Also delete from cloud storage
-                </span>
-                <span className="block text-[11px] text-[var(--ds-fg-muted)]">
+                </FieldLabel>
+                <FieldDescription className="text-[11px]">
                   Runs remote purge on uploaded folders in your connected bucket/Drive.
-                </span>
+                </FieldDescription>
               </div>
-            </label>
+            </Field>
           )}
 
           {error && (
-            <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">
+            <div
+              role="alert"
+              className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400"
+            >
               {error}
             </div>
           )}
 
           <div className="flex items-center justify-end gap-2 pt-2">
-            <button
-              type="button"
-              disabled={busy}
-              onClick={onClose}
-              className="inline-flex h-10 sm:h-8 flex-1 sm:flex-initial items-center justify-center rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-3.5 text-xs font-medium text-[var(--ds-fg)] hover:border-[var(--ds-border-strong)] cursor-pointer"
-            >
+            <AlertDialogClose className="inline-flex h-10 sm:h-8 flex-1 sm:flex-initial items-center justify-center rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-3.5 text-xs font-medium text-[var(--ds-fg)] hover:border-[var(--ds-border-strong)]">
               Cancel
-            </button>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={handleConfirm}
-              className="inline-flex h-10 sm:h-8 flex-1 sm:flex-initial items-center justify-center gap-1.5 rounded-md bg-red-600 px-4 sm:px-3.5 text-xs font-medium text-white hover:bg-red-500 disabled:opacity-50 cursor-pointer"
+            </AlertDialogClose>
+
+            <AlertDialogClose
+              value="confirm"
+              data-variant="solid"
+              data-agent-confirm="Permanently deletes selected recordings and local audio files"
+              action={async () => {
+                setError(null);
+                try {
+                  await onConfirm(deleteRemote);
+                } catch (err) {
+                  setError(err instanceof Error ? err.message : "Delete failed");
+                  throw err;
+                }
+              }}
+              className="inline-flex h-10 sm:h-8 flex-1 sm:flex-initial items-center justify-center gap-1.5 rounded-md border-0 bg-red-600 px-4 sm:px-3.5 text-xs font-medium text-white hover:bg-red-500"
             >
-              {busy ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Trash2 className="h-3.5 w-3.5" />
+              {(state) => (
+                <>
+                  {state.pending ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                  )}
+                  <span>{state.pending ? "Deleting…" : "Delete forever"}</span>
+                </>
               )}
-              <span>Delete</span>
-            </button>
+            </AlertDialogClose>
           </div>
         </div>
-      </div>
-    </div>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 };

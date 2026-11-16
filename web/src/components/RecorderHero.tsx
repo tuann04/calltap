@@ -1,7 +1,38 @@
 import React from "react";
-import { Cloud, CloudOff, ExternalLink, Loader2, Mic, Power, Square } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  Cloud,
+  CloudOff,
+  ExternalLink,
+  Loader2,
+  Mic,
+  Power,
+  Square,
+} from "lucide-react";
+import { Button } from "@ui-sdk/react/button";
+import { Field, FieldLabel } from "@ui-sdk/react/field";
+import { Input } from "@ui-sdk/react/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectItemIndicator,
+  SelectItemText,
+  SelectTrigger,
+  SelectValue,
+} from "@ui-sdk/react/select";
+import { Switch, SwitchThumb } from "@ui-sdk/react/switch";
 import type { StatusResponse, StoragePublicView } from "../types";
 import { formatCallTitle, formatServiceLabel } from "../utils/callDisplay";
+
+const SERVICE_OPTIONS = [
+  { value: "auto", label: "Auto-detect (from tab)" },
+  { value: "sesame", label: "Sesame" },
+  { value: "chatgpt", label: "ChatGPT Voice" },
+  { value: "gemini", label: "Gemini Live" },
+  { value: "custom", label: "Custom Call" },
+];
 
 interface RecorderHeroProps {
   status: StatusResponse | null;
@@ -89,21 +120,22 @@ export const RecorderHero: React.FC<RecorderHeroProps> = ({
 
             <div className="flex flex-wrap items-center gap-2 shrink-0">
               {nekoUrl && (
-                <a
-                  href={nekoUrl}
+                <Button
+                  render={<a href={nekoUrl} />}
                   className="inline-flex h-10 sm:h-9 flex-1 sm:flex-initial items-center justify-center gap-1.5 rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-3.5 text-xs font-medium text-[var(--ds-fg)] hover:border-[var(--ds-border-strong)] no-underline"
                 >
                   <span>Open Neko</span>
-                  <ExternalLink className="h-3.5 w-3.5 text-[var(--ds-fg-muted)]" />
-                </a>
+                  <ExternalLink className="h-3.5 w-3.5 text-[var(--ds-fg-muted)]" aria-hidden="true" />
+                </Button>
               )}
-              <a
-                href={wakeUrl}
-                className="inline-flex h-10 sm:h-9 flex-1 sm:flex-initial items-center justify-center gap-1.5 rounded-md bg-[var(--ds-btn-primary-bg)] px-4 text-xs font-semibold text-[var(--ds-btn-primary-fg)] hover:bg-[var(--ds-btn-primary-hover)] no-underline"
+              <Button
+                data-variant="solid"
+                render={<a href={wakeUrl} />}
+                className="inline-flex h-10 sm:h-9 flex-1 sm:flex-initial items-center justify-center gap-1.5 rounded-md border-0 bg-[var(--ds-btn-primary-bg)] px-4 text-xs font-semibold text-[var(--ds-btn-primary-fg)] hover:bg-[var(--ds-btn-primary-hover)] no-underline"
               >
-                <Power className="h-3.5 w-3.5" />
+                <Power className="h-3.5 w-3.5" aria-hidden="true" />
                 <span>Wake VM to Record</span>
-              </a>
+              </Button>
             </div>
           </div>
         ) : status?.active_call ? (
@@ -130,91 +162,106 @@ export const RecorderHero: React.FC<RecorderHeroProps> = ({
               <div className="rounded-lg border border-[var(--ds-border)] bg-[var(--ds-surface)] px-4 py-2 font-mono text-xl sm:text-lg font-semibold tabular-nums text-[var(--ds-fg)]">
                 {elapsedText}
               </div>
-              <button
+              <Button
                 type="button"
                 disabled={stopping}
                 onClick={onStop}
-                className="inline-flex h-11 sm:h-10 flex-1 sm:flex-initial items-center justify-center gap-2 rounded-lg bg-red-600 px-4 text-xs font-semibold text-white hover:bg-red-500 disabled:opacity-50 cursor-pointer"
+                className="inline-flex h-11 sm:h-10 flex-1 sm:flex-initial items-center justify-center gap-2 rounded-lg border-0 bg-red-600 px-4 text-xs font-semibold text-white hover:bg-red-500"
               >
                 {stopping ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
                 ) : (
-                  <Square className="h-3.5 w-3.5 fill-current" />
+                  <Square className="h-3.5 w-3.5 fill-current" aria-hidden="true" />
                 )}
                 <span>Stop &amp; Save</span>
-              </button>
+              </Button>
             </div>
           </div>
         ) : (
           <form onSubmit={onStart} className="flex flex-col gap-3 sm:flex-row sm:items-end">
-            <div className="w-full sm:w-48">
-              <label className="mb-1.5 block text-xs font-medium text-[var(--ds-fg-secondary)]">
+            <Field className="w-full sm:w-48">
+              <FieldLabel className="text-xs font-medium text-[var(--ds-fg-secondary)]">
                 Service
-              </label>
-              <select
+              </FieldLabel>
+              <Select
+                items={SERVICE_OPTIONS}
                 value={serviceChoice}
-                onChange={(e) => onServiceChoiceChange(e.target.value)}
-                className="h-11 sm:h-9 w-full rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-3 text-xs font-medium text-[var(--ds-fg)] focus:border-[var(--ds-fg)] focus:outline-none"
+                onValueChange={(next) => {
+                  if (next) onServiceChoiceChange(next);
+                }}
               >
-                <option value="auto">Auto-detect (from tab)</option>
-                <option value="sesame">Sesame</option>
-                <option value="chatgpt">ChatGPT Voice</option>
-                <option value="gemini">Gemini Live</option>
-                <option value="custom">Custom Call</option>
-              </select>
-            </div>
+                <SelectTrigger className="h-11 sm:h-9 w-full border-[var(--ds-border)] bg-[var(--ds-surface)] px-3 text-xs font-medium text-[var(--ds-fg)]">
+                  <SelectValue />
+                  <ChevronDown className="h-3.5 w-3.5 text-[var(--ds-fg-muted)]" aria-hidden="true" />
+                </SelectTrigger>
+                <SelectContent>
+                  {SERVICE_OPTIONS.map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>
+                      <SelectItemText>{opt.label}</SelectItemText>
+                      <SelectItemIndicator>
+                        <Check className="h-3.5 w-3.5" aria-hidden="true" />
+                      </SelectItemIndicator>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
 
-            <div className="flex-1">
-              <label className="mb-1.5 block text-xs font-medium text-[var(--ds-fg-secondary)]">
+            <Field className="flex-1">
+              <FieldLabel className="text-xs font-medium text-[var(--ds-fg-secondary)]">
                 Recording Title <span className="text-[var(--ds-fg-muted)]">(optional)</span>
-              </label>
-              <input
+              </FieldLabel>
+              <Input
                 type="text"
                 value={newTitle}
-                onChange={(e) => onNewTitleChange(e.target.value)}
+                onValueChange={onNewTitleChange}
                 placeholder="e.g., Evening English practice with Maya"
-                className="h-11 sm:h-9 w-full rounded-md border border-[var(--ds-border)] bg-[var(--ds-surface)] px-3 text-xs text-[var(--ds-fg)] placeholder:text-[var(--ds-fg-muted)] focus:border-[var(--ds-fg)] focus:outline-none"
+                className="h-11 sm:h-9 w-full border-[var(--ds-border)] bg-[var(--ds-surface)] px-3 text-xs text-[var(--ds-fg)] placeholder:text-[var(--ds-fg-muted)]"
               />
-            </div>
+            </Field>
 
-            <button
+            <Button
               type="submit"
+              data-variant="solid"
               disabled={starting}
-              className="inline-flex h-11 sm:h-9 w-full sm:w-auto shrink-0 items-center justify-center gap-2 rounded-md bg-[var(--ds-btn-primary-bg)] px-4 text-xs font-semibold text-[var(--ds-btn-primary-fg)] hover:bg-[var(--ds-btn-primary-hover)] disabled:opacity-50 cursor-pointer"
+              className="inline-flex h-11 sm:h-9 w-full sm:w-auto shrink-0 items-center justify-center gap-2 rounded-md border-0 bg-[var(--ds-btn-primary-bg)] px-4 text-xs font-semibold text-[var(--ds-btn-primary-fg)] hover:bg-[var(--ds-btn-primary-hover)]"
             >
               {starting ? (
-                <Loader2 className="h-4 w-4 sm:h-3.5 sm:w-3.5 animate-spin" />
+                <Loader2 className="h-4 w-4 sm:h-3.5 sm:w-3.5 animate-spin" aria-hidden="true" />
               ) : (
-                <Mic className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
+                <Mic className="h-4 w-4 sm:h-3.5 sm:w-3.5" aria-hidden="true" />
               )}
               <span>Start Recording</span>
-            </button>
+            </Button>
           </form>
         )}
       </div>
 
       <div className="flex flex-col items-start gap-2.5 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between border-t border-[var(--ds-border)] bg-[var(--ds-surface)] px-4 sm:px-5 py-3 sm:py-2.5 text-xs text-[var(--ds-fg-muted)] rounded-b-xl">
-        <label className="inline-flex cursor-pointer items-center gap-2.5">
-          <input
-            type="checkbox"
+        <Field className="flex-row items-center gap-2.5">
+          <Switch
             checked={Boolean(status?.auto_detect)}
             disabled={vmSleeping}
-            onChange={onToggleAutoDetect}
-            className="h-4 w-4 sm:h-3.5 sm:w-3.5 accent-[var(--ds-fg)] cursor-pointer disabled:opacity-50"
-          />
-          <span className="text-[var(--ds-fg-secondary)]">
+            onCheckedChange={(next) => {
+              if (next !== Boolean(status?.auto_detect)) onToggleAutoDetect();
+            }}
+          >
+            <SwitchThumb />
+          </Switch>
+          <FieldLabel className="cursor-pointer text-xs text-[var(--ds-fg-secondary)]">
             Auto-detect calls from browser microphone
-          </span>
-        </label>
+          </FieldLabel>
+        </Field>
 
-        <button
+        <Button
           type="button"
-          onClick={() => !vmSleeping && onOpenStorage()}
-          className="inline-flex items-center gap-1.5 text-left text-xs text-[var(--ds-fg-secondary)] hover:text-[var(--ds-fg)] cursor-pointer"
+          disabled={vmSleeping}
+          onClick={onOpenStorage}
+          className="inline-flex h-auto items-center gap-1.5 border-0 bg-transparent px-0 text-left text-xs text-[var(--ds-fg-secondary)] hover:text-[var(--ds-fg)]"
         >
           {cloudConnected ? (
             <>
-              <Cloud className="h-3.5 w-3.5 shrink-0 text-emerald-500" />
+              <Cloud className="h-3.5 w-3.5 shrink-0 text-emerald-500" aria-hidden="true" />
               <span className="truncate">
                 {vmSleeping
                   ? `Serving archive directly from ${storageView.remote_label}`
@@ -225,11 +272,11 @@ export const RecorderHero: React.FC<RecorderHeroProps> = ({
             </>
           ) : (
             <>
-              <CloudOff className="h-3.5 w-3.5 shrink-0" />
+              <CloudOff className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
               <span>Saving locally · Connect R2 / S3 / Google Drive</span>
             </>
           )}
-        </button>
+        </Button>
       </div>
     </section>
   );

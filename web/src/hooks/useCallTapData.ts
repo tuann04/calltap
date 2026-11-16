@@ -6,9 +6,10 @@ import {
   type StatusResponse,
   type StoragePublicView,
 } from "../types";
+import type { NotifyFn } from "../components/AppToastRegion";
 import { extractHostname } from "../utils/callDisplay";
 
-export function useCallTapData(notify: (msg: string, tone?: "ok" | "err") => void) {
+export function useCallTapData(notify: NotifyFn) {
   const [status, setStatus] = useState<StatusResponse | null>(null);
   const [calls, setCalls] = useState<CallMetadata[]>([]);
   const [loading, setLoading] = useState(true);
